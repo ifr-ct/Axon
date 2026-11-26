@@ -25,7 +25,15 @@ Use standard-library `unittest`; name files `test_*.py` and methods `test_*`. Te
 
 ## Commit & Pull Request Guidelines
 
-The initial repository history has no established scoped commit convention. Use imperative, scoped subjects such as `feat(parser): expand fixed arrays`. Describe the behavior changed, validation performed, and remaining limitations. Link relevant issues and include dashboard screenshots for visual changes.
+Use imperative, scoped subjects such as `feat(parser): expand fixed arrays`. Describe behavior changes, validation, and limitations. Link relevant issues and include screenshots for UI changes.
+
+## Feature Branch & Acceptance Workflow
+
+1. Before implementing each new feature, create a dedicated `feat/<short-name>` branch from the latest `origin/main` (for example, `feat/serial-transport`). Keep unrelated features on separate branches.
+2. Develop, test, commit, and push on that feature branch. Never commit new features directly to `main`.
+3. Deliver the branch link, changes, test results, and any runnable artifact for user acceptance. Requests to commit or push authorize updating the feature branch, not merging it.
+4. Merge into `main` only after the user explicitly accepts the delivered feature. Passing tests is not acceptance; subsequent feature changes require renewed acceptance.
+5. After approval, preserve remote history, merge the accepted branch, verify `main`, and report the merge commit. Keep unaccepted branches separate when starting another feature.
 
 ## Configuration & Safety
 
