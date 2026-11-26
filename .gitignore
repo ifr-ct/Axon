@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+*.axf
+*.elf
+.pytest_cache/
+output/
+build/
+dist/
+*.tmws
+app_state.json
+.axf_telemetry/
+.env
+.env.*
+*.log

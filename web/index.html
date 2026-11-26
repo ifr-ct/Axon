@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="api-token" content="__API_TOKEN__">
+  <title>Telemetry Studio</title><link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <aside class="sidebar" aria-label="Main navigation">
+    <div class="brand" title="Telemetry Studio">t<span>•</span></div>
+    <div class="nav-items">
+      <button class="nav active" data-view="workspace" title="工作台" aria-label="工作台"><i data-icon="grid"></i></button>
+      <button class="nav" data-view="favorites" title="收藏夹与预设" aria-label="收藏夹与预设"><i data-icon="star"></i></button>
+      <button class="nav" data-view="connections" title="通信连接" aria-label="通信连接"><i data-icon="connect"></i></button>
+      <button class="nav" data-view="settings" title="协议设置" aria-label="协议设置"><i data-icon="settings"></i></button>
+    </div>
+    <button id="reload" class="nav bottom" title="重新加载固件" aria-label="重新加载固件"><i data-icon="reload"></i></button>
+    <div class="sidebar-caption">V1.0</div>
+  </aside>
+  <main>
+    <header class="topbar">
+      <span class="eyebrow">TELEMETRY STUDIO</span>
+      <div class="top-status"><button id="change-alert" class="icon-btn" title="固件文件未变更" aria-label="固件更新状态"><i data-icon="bell"></i><span class="dot hidden"></span></button><span id="firmware-pill" class="pill"><b class="status-dot gray"></b>No firmware</span><div class="workspace-switcher"><button id="workspace-toggle" class="workspace-toggle" aria-haspopup="true" aria-expanded="false"><b id="workspace-save-dot" class="status-dot"></b><span id="workspace-name">默认工作区</span><span class="workspace-chevron">⌄</span></button><div id="workspace-menu" class="workspace-menu hidden"><div class="workspace-menu-heading"><span>WORKSPACE</span><span id="workspace-save-label">已保存</span></div><div id="workspace-location" class="workspace-location"></div><div id="workspace-save-error" class="error-text"></div><button data-workspace-action="new">＋ 新建工作区…</button><button data-workspace-action="open">↗ 打开 .tmws…</button><button data-workspace-action="save_as">另存为…</button><button data-workspace-action="save">立即保存</button><button data-workspace-action="reveal">在资源管理器中定位</button><div class="workspace-menu-heading recent-heading">RECENT WORKSPACES</div><div id="recent-workspaces"></div></div></div></div>
+    </header>
+    <div class="heading"><div><div class="eyebrow">EMBEDDED WORKSPACE</div><h1 id="page-title">Telemetry configuration<span> control, with clarity.</span></h1><p>从固件符号到遥测通道，让每个字节清晰可见。</p></div><span class="pill"><b class="status-dot"></b>Local workspace</span></div>
+    <div id="workspace" class="workspace">
+      <section class="left-column">
+        <article class="load-card">
+          <div class="card-top"><span class="icon-tile"><i data-icon="file"></i></span><span class="small-label">01 / FIRMWARE</span></div>
+          <h2>Load firmware<span class="light">.axf</span></h2><p>解析调试符号，构建你的变量工作空间。</p>
+          <div class="path-input" id="dropzone"><input id="firmware-path" placeholder="粘贴 .axf 路径，或点击浏览" aria-label="Firmware path"><button id="browse" title="浏览文件">浏览</button><button id="load" class="load-arrow" aria-label="加载固件">↗</button></div>
+          <div class="load-footer"><span id="load-state">ELF + DWARF · ARM Cortex</span><button id="demo" class="text-btn">加载示例符号 <span>↗</span></button></div>
+        </article>
+        <article class="overview">
+          <div class="card-top"><span class="small-label">FIRMWARE FINGERPRINT</span><span id="frame-status" class="pill"><b class="status-dot gray"></b>Empty</span></div>
+          <div id="fingerprint" class="fingerprint">0x————————</div><div id="fingerprint-source" class="muted tiny">等待加载固件</div>
+          <div class="metrics"><div><span>Channels</span><strong id="metric-channels">0 <small>/ 12</small></strong></div><div><span>Frame size</span><strong id="metric-size">— <small>B</small></strong></div><div><span>CRC16 · MODBUS</span><strong id="metric-crc">—</strong></div><div><span>RAM check</span><strong id="metric-ram">—</strong></div></div>
+          <div class="overview-bottom"><div><div class="small-label">ACTIVE CHANNELS</div><div id="channel-preview" class="preview">Select symbols to get started</div></div><div class="round-buttons"><button id="copy-hex" class="black-circle" title="复制 HEX" aria-label="复制 HEX"><i data-icon="copy"></i></button><button id="copy-c" class="black-circle" title="复制 C 数组" aria-label="复制 C 数组">{ }</button></div></div>
+        </article>
+        <section class="favorites-section"><div class="section-heading"><h2>Favorites <span id="favorites-count">0</span></h2><span class="muted tiny">始终绑定符号路径</span></div><div id="favorites-list"></div></section>
+        <section class="presets-section"><div class="section-heading"><h2>Channel presets</h2><button id="save-preset" class="text-btn">＋ 保存当前</button></div><div id="presets-list"></div></section>
+      </section>
+      <section class="right-column">
+        <div class="panel-caption"><span><b class="status-dot"></b> SYMBOL EXPLORER</span><span id="symbol-count">0 symbols</span></div>
+        <article class="tree-card"><div class="section-heading tree-heading"><div><h2>Firmware variables <span class="chip">RAM</span></h2><p class="muted tiny">展开结构体 · 收藏变量 · 配置通道</p></div><label class="search tree-search"><i data-icon="search"></i><input id="search" placeholder="Search symbol or 0x address..." aria-label="Search symbols"><kbd>/</kbd></label></div><div id="symbol-tree" class="symbol-tree"><div class="empty-state"><div class="empty-icon">⌘</div><h3>Your firmware, explored.</h3><p>加载 .axf 文件或示例符号，<br>开始构建遥测通道。</p><button class="button" id="empty-demo">Explore demo ↗</button></div></div><div id="parser-notes" class="parser-notes"></div></article>
+        <article class="frame-card"><div class="section-heading"><div><h2>Frame inspector <span class="live-label">LIVE</span></h2><p class="muted tiny">拖拽排序，或使用方向按钮调整通道</p></div><button id="clear-slots" class="text-btn muted">清空</button></div><div id="slots-list" class="slots-list"></div><div class="frame-label"><span class="small-label">BINARY PAYLOAD <span id="byte-count"></span></span><button id="copy-output" class="text-btn">复制 <i data-icon="copy"></i></button></div><div id="frame-error" class="error-text"></div><div id="payload" class="payload">等待选择通道…</div><div class="legend"><span><b class="legend-dot header-color"></b>Header / Cmd</span><span><b class="legend-dot fingerprint-color"></b>Fingerprint</span><span><b class="legend-dot slot-color"></b>Channels</span><span><b class="legend-dot crc-color"></b>CRC16</span></div><div class="send-row"><span id="transport-status" class="tiny muted">Mock connected</span><button id="send" class="button">模拟发送 <span>↗</span></button></div><details id="send-log"><summary>Mock send log <span id="log-count">0</span></summary><pre id="log-output">No frames sent.</pre></details></article>
+        <div class="format-switch" aria-label="输出格式"><button data-format="hex" class="selected">HEX</button><button data-format="c_array">C-Array</button><button data-format="python">Python Bytes</button></div>
+      </section>
+    </div>
+    <section id="connections-view" class="alternate hidden"><div class="eyebrow">TRANSPORT LAYER</div><h2>Connection settings</h2><p class="muted">V1 使用模拟传输器。以下配置用于展示 V2 接入边界，尚不建立真实连接。</p><div class="connection-grid"><article><i data-icon="connect"></i><h3>Serial port</h3><span class="pill">待接入 · V2</span><label>Port<input value="COM3" disabled></label><label>Baud rate<input value="115200" disabled></label><label>Data bits<input value="8" disabled></label></article><article><h3>TCP Client</h3><span class="pill">待接入 · V2</span><label>Remote host<input value="127.0.0.1" disabled></label><label>Port<input value="9000" disabled></label></article><article><h3>TCP Server</h3><span class="pill">待接入 · V2</span><label>Listen address<input value="0.0.0.0" disabled></label><label>Port<input value="9000" disabled></label><label>Max clients<input value="8" disabled></label></article></div><p class="tiny muted">UDP / VOFA+ 桥接预留后续扩展。</p></section>
+    <section id="settings-view" class="alternate hidden"><div class="eyebrow">PROTOCOL CONFIGURATION</div><h2>Make the bytes yours.</h2><form id="settings-form"><div class="settings-grid"><label>Frame header · 2 bytes<input id="setting-header" required placeholder="AA55"></label><label>Maximum channels · 1–255<input id="setting-max" type="number" min="1" max="255" required></label><label>Checksum<input value="CRC-16/MODBUS · little-endian" disabled></label><label class="full">合法 RAM 地址段 · 起始包含 / 结束不包含<textarea id="setting-ram" rows="5" required></textarea><small>每行一组，例如 0x20000000-0x20020000。检查包含变量完整字节宽度。</small></label></div><button class="button" type="submit">保存协议配置 ↗</button></form></section>
+    <footer><span>TELEMETRY STUDIO <b> / </b> EMBEDDED TOOLS</span><span>Little-endian. Locally yours.</span></footer>
+  </main>
+  <div id="toast" role="status" class="toast hidden"></div>
+  <dialog id="preset-dialog"><form id="preset-form"><h2>Save channel preset</h2><p class="muted">仅保存路径，下次加载固件时重新匹配地址。</p><input id="preset-name" placeholder="e.g. Chassis tuning" required maxlength="80"><div class="dialog-actions"><button id="cancel-preset" type="button" class="text-btn">取消</button><button class="button">保存</button></div></form></dialog>
+  <dialog id="workspace-dialog"><form id="workspace-form"><h2 id="workspace-dialog-title">打开工作区</h2><label id="workspace-name-label">工作区名称<input id="new-workspace-name" maxlength="120" placeholder="例如：WheelLeg 调试"></label><label>工作区文件路径<input id="workspace-file-path" required placeholder="D:\Projects\WheelLeg\debug.tmws"></label><p class="muted tiny">工作区使用 UTF-8 JSON；固件路径优先相对于此文件保存。</p><div class="dialog-actions"><button id="cancel-workspace" type="button" class="text-btn">取消</button><button class="button" type="submit">确定</button></div></form></dialog>
+  <script src="/app.js"></script>
+</body>
+</html>

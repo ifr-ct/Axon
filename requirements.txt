@@ -1,0 +1,2 @@
+pyelftools>=0.32,<1
+pywebview>=6,<7
