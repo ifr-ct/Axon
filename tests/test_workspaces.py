@@ -5,6 +5,7 @@ import tempfile
 import threading
 import unittest
 from unittest.mock import patch
+import zlib
 
 from telemetry.bridge import Bridge
 from telemetry.storage import Storage, atomic_write, default_workspace, relative_firmware_path
@@ -70,7 +71,7 @@ class WorkspaceTests(unittest.TestCase):
             self.assertEqual(result['favorites'], ['g_armed'])
             self.assertEqual(result['settings']['header'], 'BB66')
             self.assertEqual(restored.app_state['window_size'], dict(width=1234, height=876))
-            self.assertEqual(result['firmware']['fingerprint'], 0x12345678)
+            self.assertEqual(result['firmware']['fingerprint'], zlib.crc32(b'12345678901234567890'))
         finally:
             restored.close()
 

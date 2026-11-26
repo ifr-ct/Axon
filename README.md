@@ -2,7 +2,7 @@
 
 **面向 ARM 固件的桌面遥测变量配置工具。** 读取 `.axf` / ELF 的 DWARF 调试信息，按符号路径收藏变量，编排通道并生成小端二进制切换帧。当前为 V1 MVP，应用窗口和可执行文件沿用 **Telemetry Studio** 名称。
 
-Python + pyelftools + pywebview 后端配合本地 HTML/CSS/JavaScript 仪表盘；无需前端构建、CDN 或数据库。V1 可生成、复制与模拟发送配置帧，真实串口与网络通信尚未接入。
+Python + pyelftools + pywebview + pyserial 后端配合本地 HTML/CSS/JavaScript 仪表盘；无需前端构建、CDN 或数据库。V1 可生成、复制配置帧，并可通过本机串口或 TCP Client 发送；TCP 下行原始字节可由本机 `127.0.0.1:9000` 代理转发给 VOFA+。UDP 转发尚未接入。
 
 ## 功能概览
 
@@ -13,6 +13,8 @@ Python + pyelftools + pywebview 后端配合本地 HTML/CSS/JavaScript 仪表盘
 | 变量浏览 | 变量树、路径/类型/地址搜索；仅展开相关分支，名称命中的结构体默认折叠 |
 | 通道配置 | 收藏夹、命名预设、拖拽/按钮排序，重编译后按路径匹配最新地址 |
 | 协议帧 | CRC-16/MODBUS、小端编码，HEX / C 数组 / Python Bytes 输出 |
+| 串口发送 | 本机 COM 口连接/断开与配置帧发送；Mock 仅记录日志 |
+| TCP + 本机代理 | 单条 TCP Client 连接车上模块；本机代理把下行原始字节转发给 VOFA+ |
 | 多项目 | `.tmws` 工作区、500ms 自动保存、启动恢复及最近 5 个工作区 |
 | 桌面分发 | Windows x64 单文件 EXE，无控制台，无需预装 Python |
 | 示例模式 | 无固件文件即可体验 16 个示例符号与模拟发送日志 |
@@ -41,9 +43,10 @@ telemetry/
   transports/
     base.py                   统一生命周期与接收回调接口
     mock_transport.py         V1 模拟发送、最多保留 200 条日志
-    serial_transport.py       串口配置模型 / V2 占位
-    tcp_client_transport.py   TCP Client 配置 / V2 占位
-    tcp_server_transport.py   TCP Server 配置 / V2 占位
+    serial_transport.py       真实串口连接 / 发送（pyserial）
+    tcp_client_transport.py   单条 TCP Client 连接 / 发送 / 接收回调
+    proxy_server.py           127.0.0.1 本机代理（转发下行字节给 VOFA+）
+    tcp_server_transport.py   本地代理旧名称兼容别名
     __init__.py               TransportManager 调度
 web/                          HTML、CSS、JavaScript 仪表盘
 tests/                        unittest 与程序生成的 ARM ELF 测试数据
@@ -90,11 +93,11 @@ python -m venv .venv
 浏览器开发模式（首次安装最小依赖后运行）：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install pyelftools
+.\.venv\Scripts\python.exe -m pip install pyelftools pyserial
 .\.venv\Scripts\python.exe main.py --browser
 ```
 
-该模式会打开默认浏览器并在终端打印随机分配的回环端口；可选 `--port 8765` 固定端口。原生文件选择和拖入文件路径功能使用桌面模式；浏览器模式请输入本地绝对路径。
+该模式会打开默认浏览器并在终端打印随机分配的回环端口；可选 `--port <port>` 固定端口。原生文件选择和拖入文件路径功能使用桌面模式；浏览器模式请输入本地绝对路径。
 
 服务仅监听 `127.0.0.1`，每次启动生成 API 令牌；关闭桌面窗口或在浏览器服务终端按 Ctrl+C 退出。若桌面运行失败，先使用浏览器模式检查界面，再检查 WebView2 与 .NET 安装情况。
 
@@ -106,7 +109,19 @@ python -m venv .venv
 4. 保存通道预设。收藏与预设仅保存符号路径，加载新版固件后自动解析最新地址；失配显示 Missing，阻止生成错误帧。
 5. 设置页可调整帧头、最大通道数与 RAM 白名单。所有 RAM 区间采用 `[start, end)`；检查变量完整宽度。越界符号标黄且不能从变量树添加。
 6. UI 每 1.2 秒检测文件修改时间及大小；更新提示出现后点击铃铛或侧栏底部刷新。解析在工作线程进行，失败保留上一次有效符号。新固件仍保留原通道路径。
-7. “模拟发送”仅写入应用内发送日志；Serial、TCP Client/Server 均显示“待接入”，尚无真实设备 I/O。
+7. 连接页可连接本机串口，或用 TCP Client 连接车上模块；TCP 连接成功后 Local proxy 默认在 `127.0.0.1:9000` 等待 VOFA+。Mock 仅写日志；串口/TCP 写入成功只代表字节离开主机，不代表固件已接收或生效。
+
+### 串口发送
+
+在连接页输入或选择 COM 口，设置波特率和数据位后点击“连接串口”。连接成功后帧区按钮变为“串口发送”，按当前配置帧写入串口；写入失败会自动关闭端口并显示错误，需重新连接。点击“切换到模拟发送”可在无硬件时继续使用 Mock。串口配置随工作区保存在 `.tmws` 的 `transport.serial`，启动或切换工作区时不会自动打开端口。
+
+当前实现只发送，不读取串口响应，也不提供 ACK、自动重连或流控配置；TXD/RXD 接线、电平、波特率和数据位仍需与固件一致。
+
+### TCP 上游与本机代理
+
+TCP Client 连接车上模块，只建立一条上游连接。连接成功后 Local proxy 默认监听 `127.0.0.1:9000`，VOFA+ 连接该地址即可查看波形；也可在代理卡片中单独启动、停止或修改监听端口。代理只把上游收到的原始下行字节广播给本机 VOFA+ 客户端，不解析、不回传、不缓存。
+
+TCP 配置保存在 `.tmws` 的 `transport.tcp`，代理配置保存在 `transport.proxy`；启动或切换工作区不会自动连接、监听。当前没有自动重连、心跳、TLS 或 UDP 转发；TCP 连接失败或代理端口被占用会在连接页显示错误。
 
 ## 多项目工作区与启动记忆
 
@@ -139,9 +154,11 @@ python -m venv .venv
 
 点击顶部“项目接入助手”，选择 **固件接入 / 符号与指纹 / 联调验收**，可补充项目背景、MCU/工具链和计划链路，点击“生成 / 刷新提示词”后预览、一键复制。将提示词粘贴到已打开客户嵌入式工程的 AI 编程助手，指导其依据工程事实完成接入并给出构建和验证步骤。
 
-提示词从当前工作区读取帧头、最大通道数和 RAM 白名单，包含准确字段顺序、CRC 定义、类型枚举（bool 复用 type 6）及指纹一致性要求。勾选“附带工作区名称、固件标识与通道样例”时会附带符号路径及有效帧中的 RAM 地址；取消勾选可去除这些项目快照，当前协议设置仍保留。
+提示词从当前工作区读取帧头、最大通道数和 RAM 候选区间，并内置固定的协议字段顺序、Cmd/CRC/Type 约束、build stamp 指纹规则、项目勘察表和链接脚本推导 RAM 白名单的要求。提示词明确要求先输出 MCU/RTOS/链路/RAM 事实表并等待确认，未确认前不得实施地址直读；无法确认 RAM 时转入固定通道表等安全回退。
 
-该功能完全在本地生成文本，无需 API Key，不自动调用 AI 或上传工程，也不直接修改客户工程。Demo 不提供硬件帧样例，固件解析中或文件已更新时不附带旧帧。预览固定于生成时的快照，协议或固件变化后需要重新生成。V1 的真实串口/TCP 通信和遥测上行格式仍需独立实现或确认；模板会明确这些边界。
+勾选“附带工作区名称、固件标识、RAM 候选区间与通道样例”时会附带符号路径、RAM 候选区间及有效帧中的 RAM 地址；取消勾选可去除这些项目快照，当前协议设置仍保留。RAM 候选区间只用于对照，提示词仍要求从实际链接脚本和 `.map` 重新推导。
+
+该功能完全在本地生成文本，无需 API Key，不自动调用 AI 或上传工程，也不直接修改客户工程。Demo 不提供硬件帧样例，固件解析中或文件已更新时不附带旧帧。预览固定于生成时的快照，协议或固件变化后需要重新生成。V1 已支持本机串口、TCP Client 发送以及 `127.0.0.1:9000` 本机代理；UDP 转发和遥测上行格式仍需独立实现或确认，模板会明确这些边界。
 
 ## 线协议
 
@@ -155,7 +172,7 @@ python -m venv .venv
 
 V1 支持常量成员偏移和单个 `DW_OP_plus_uconst` 偏移表达式，支持 `DW_ATE_boolean` 编码的 1 字节 bool（包括 typedef/const 包装）；指针、bitfield、动态数组、double、动态位置/location list、C++ 虚继承等不支持的叶子会跳过或提示。递归限制 32 层、100000 个叶子。优化可能删除或改变调试变量；推荐保留调试符号并降低优化。固定地址 ROM 符号不作为可发送变量。
 
-优先从符号表读取 `g_fw_fingerprint` / `g_build_stamp` 的 **4 字节对象**，排除 BSS；否则回退整个文件 CRC32。请使用明确的 `uint32_t` 固件指纹，避免时间戳字符串误用。
+指纹仅对符号表中的 `g_telemetry_build_stamp` 字符串计算 CRC32，遇到结尾 NUL 即停止（与固件 `strlen` 一致），不再对整个 AXF 文件计算 CRC32。该符号应位于已初始化、可读取的段中，并确保目标端采用相同的构建标识字节。
 
 ## 验证
 
@@ -164,9 +181,9 @@ V1 支持常量成员偏移和单个 `DW_OP_plus_uconst` 偏移表达式，支�
 node --check web/app.js
 ```
 
-测试包含 CRC 标准向量、字段字节序、非法帧、RAM 边界、收藏重绑定、预设、mock 发送，以及无需交叉编译器生成的 ARM ELF32/DWARF4 集成夹具。真实 Keil/ARM Compiler 生成物仍需用目标工程验收，尤其是优化后的 C++ 类型和 DWARF 表达式。
+测试包含 CRC 标准向量、字段字节序、非法帧、RAM 边界、收藏重绑定、预设、Mock/串口/TCP 发送，以及 TCP 回环代理转发和无需交叉编译器生成的 ARM ELF32/DWARF4 集成夹具。串口测试通过伪造 `serial.Serial` 验证连接、写入、断开和错误路径，不访问真实 COM 口；TCP/代理测试使用临时回环端口。真实 Keil/ARM Compiler 生成物仍需用目标工程验收，尤其是优化后的 C++ 类型和 DWARF 表达式。
 
-当前测试覆盖协议、工作区、ARM ELF 夹具，以及接入提示词的自定义协议、Demo/过期帧排除和项目快照开关。Windows 11 x64 / Python 3.14.3 已完成单文件 EXE 窗口启动与 ARM ELF 夹具解析验证。Node.js 仅用于 JavaScript 语法检查，运行桌面程序无需安装 Node.js。
+当前测试覆盖协议、工作区、ARM ELF 夹具、串口传输、TCP 上游与本机代理，以及接入提示词的自定义协议、Demo/过期帧排除和项目快照开关。Windows 11 x64 / Python 3.14.3 已完成单文件 EXE 窗口启动与 ARM ELF 夹具解析验证。Node.js 仅用于 JavaScript 语法检查，运行桌面程序无需安装 Node.js。
 
 ## 常见问题
 
@@ -174,11 +191,13 @@ node --check web/app.js
 - **收藏显示 Missing**：收藏按路径绑定；固件改名、成员删除或编译单元路径变更后，需重新选择变量。
 - **帧无法生成**：至少选择 1 个通道，且槽位数量、类型和完整地址范围必须符合当前项目设置。Missing 和 RAM 越界都会阻止生成。
 - **工作区保存失败**：查看切换器中的错误信息，检查目录写权限；可通过“另存为”保存到其他位置。
+- **串口连接/发送失败**：确认 COM 口未被其他程序占用、波特率和数据位匹配固件；发送失败会自动关闭端口，需重新连接。串口写入成功不等于固件已接收或生效。
+- **TCP 连接/代理失败**：确认车上模块已监听目标 host:port；代理端口被占用、上游断开或 VOFA+ 未连接都会显示在连接页。代理只转发已收到的下行字节，不回传、不缓存。
 - **EXE 启动失败**：确认系统具备 WebView2 Runtime 和 .NET Framework，查看 `~/.axf_telemetry/startup.log`。无需复制 `.venv` 或 `web/` 到 EXE 旁边。
 
 ## 后续扩展与贡献
 
-`BaseTransport` 与 `TransportManager` 已预留串口、TCP Client、TCP Server 的接入边界；UDP / VOFA+ 桥接为后续方向。V1 不执行真实设备读写。
+`BaseTransport` 与 `TransportManager` 已接入真实串口与单条 TCP Client；本机代理把 TCP 下行原始字节转发给 VOFA+。UDP 转发仍为后续方向；V1 不解析遥测上行格式，串口为只写，串口/TCP 写入成功不代表固件已接收或生效。
 
 贡献前请阅读 [AGENTS.md](AGENTS.md)，修改核心逻辑后运行测试。反馈解析问题时，请说明芯片、编译器、优化等级和 DWARF 版本，并提供可公开的最小复现；请勿提交私有固件、个人工作区或凭据。
 

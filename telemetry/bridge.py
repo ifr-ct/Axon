@@ -9,7 +9,7 @@ from .parser import demo, parse_firmware
 from .onboarding import generate_prompt
 from .protocol import ChannelSlot, RAM_RANGES, in_ram
 from .storage import Storage, default_workspace, relative_firmware_path
-from .transports import TransportManager
+from .transports import ProxyConfig, SerialConfig, TCPClientConfig, TransportManager, list_serial_ports
 
 
 class Bridge:
@@ -33,6 +33,9 @@ class Bridge:
         self.future = None
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.manager = TransportManager()
+        self.serial_config = SerialConfig()
+        self.tcp_config = TCPClientConfig()
+        self.proxy_config = ProxyConfig()
         self.window = None
         self.workspace_path = self.storage.path
         self.workspace_name = '默认工作区'
@@ -137,6 +140,7 @@ class Bridge:
                 self.flush()
                 self._remember_workspace()
         finally:
+            self.manager.disconnect()
             self.pool.shutdown(wait=False, cancel_futures=True)
 
     def _start_parse(self, path):
@@ -155,9 +159,22 @@ class Bridge:
         self.settings = self.validate_settings({**document['protocol'], 'ranges': document['mcu_ram_ranges']})
         self.saved = dict(favorites=list(document['favorites']), presets={k: list(v) for k, v in document['presets'].items()})
         self.slots = list(document['active_slots'])
-        self.transport_config = document['transport']
+        self.transport_config = dict(document['transport'])
+        self.serial_config = SerialConfig()
+        self.tcp_config = TCPClientConfig()
+        self.proxy_config = ProxyConfig()
+        self.manager.reset()
         self.firmware, self.path, self.stamp = None, None, None
         self.error, self.save_error, self.dirty = '', '', False
+        for key, factory, attribute in (('serial', SerialConfig.from_dict, 'serial_config'),
+                                        ('tcp', TCPClientConfig.from_dict, 'tcp_config'),
+                                        ('proxy', ProxyConfig.from_dict, 'proxy_config')):
+            value = self.transport_config.get(key)
+            if value is not None:
+                try:
+                    setattr(self, attribute, factory(value))
+                except ValueError as error:
+                    self.error = f'Invalid {key} settings; using defaults: {error}'
         if document['axf_path']:
             firmware_path = Path(document['axf_path'])
             if not firmware_path.is_absolute():
@@ -269,9 +286,13 @@ class Bridge:
                                       [payload[8+i*5:13+i*5].hex(' ') for i in range(len(slots))] + [payload[-2:].hex(' ')])
             except ValueError as error:
                 frame_error = str(error)
+        transport = self.manager.state()
+        transport['serial'] = self.serial_config.to_dict()
+        transport['tcp'] = self.tcp_config.to_dict()
+        transport['proxy'].update(self.proxy_config.to_dict())
         return dict(firmware=firmware, slots=self.slots, favorites=self.saved['favorites'], presets=self.saved['presets'],
                     settings=self.settings, loading=bool(self.future), changed=changed, error=self.error,
-                    frame=frame, frame_error=frame_error, transport=self.manager.transport.get_status(), logs=list(self.manager.transport.log),
+                    frame=frame, frame_error=frame_error, transport=transport, logs=list(self.manager.log),
                     workspace=dict(name=self.workspace_name, path=str(self.workspace_path) if self.workspace_path else None,
                                    generation=self.workspace_generation, firmware_path=self.path,
                                    status='error' if self.save_error else 'pending' if self.dirty else 'saved',
@@ -286,6 +307,8 @@ class Bridge:
                     return {'prompt': generate_prompt(data.get('kind', 'firmware'), self.snapshot(),
                                                      project=data.get('project', ''), mcu=data.get('mcu', ''),
                                                      link=data.get('link', ''), include_context=data.get('include_context', True))}
+                if action == 'serial_ports':
+                    return {'ports': list_serial_ports()}
                 self._action(action, data or {})
                 return self.snapshot()
             except Exception as error:
@@ -353,11 +376,42 @@ class Bridge:
             settings = self.validate_settings(data)
             self.settings = settings
             self.persist()
+        elif action == 'transport_connect':
+            kind = data.get('kind')
+            if kind == 'mock':
+                self.manager.connect('mock')
+            elif kind == 'serial':
+                config = SerialConfig.from_dict(data.get('config'))
+                self.manager.connect('serial', config)
+                self.serial_config = config
+                self.transport_config = {**self.transport_config, 'serial': config.to_dict()}
+                self.persist()
+            elif kind == 'tcp':
+                config = TCPClientConfig.from_dict(data.get('config'))
+                proxy_config = ProxyConfig.from_dict(data['proxy']) if data.get('proxy') is not None else self.proxy_config
+                self.manager.connect('tcp', config, proxy_config)
+                self.tcp_config = config
+                self.proxy_config = proxy_config
+                self.transport_config = {**self.transport_config, 'tcp': config.to_dict(),
+                                         'proxy': proxy_config.to_dict()}
+                self.persist()
+            else:
+                raise ValueError('Unknown transport type.')
+        elif action == 'transport_disconnect':
+            self.manager.disconnect()
+        elif action == 'proxy_start':
+            config = ProxyConfig.from_dict(data.get('config'))
+            self.proxy_config = config
+            self.manager.start_proxy(config)
+            self.transport_config = {**self.transport_config, 'proxy': config.to_dict()}
+            self.persist()
+        elif action == 'proxy_stop':
+            self.manager.stop_proxy()
         elif action in ('generate', 'send'):
             slots, fingerprint, options = self._frame()
             if action == 'send':
                 if not self.manager.send(slots, fingerprint, **options):
-                    raise ValueError('Mock transport is disconnected.')
+                    raise ValueError(self.manager.error or 'Transport is disconnected.')
             else:
                 self.manager.generate(slots, fingerprint, **options)
         else:
