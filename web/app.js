@@ -101,10 +101,90 @@ function render() {
   $('#frame-error').textContent = state.frame_error;
   $('#byte-count').textContent = state.frame ? ` / ${state.frame.size} BYTES` : '';
   renderPayload();
-  $('#send').disabled = !state.frame;
-  $('#transport-status').textContent = state.transport;
+  const transport = state.transport && typeof state.transport === 'object' ? state.transport : null;
+  $('#send').disabled = !state.frame || !transport?.connected;
+  $('#send-label').textContent = transport?.kind === 'serial' ? '串口发送' : transport?.kind === 'tcp' ? 'TCP 发送' : '模拟发送';
+  $('#transport-status').textContent = transport ? transport.status : 'Backend outdated · 请关闭旧窗口并重新运行 start.bat';
+  renderConnections();
   $('#log-count').textContent = state.logs.length;
-  $('#log-output').textContent = state.logs.length ? state.logs.map((line, i) => `${i + 1}. ${line}`).join('\n') : 'No frames sent.';
+  $('#log-output').textContent = state.logs.length ? state.logs.map((line, i) => `${i + 1}. ${line}`).join('\n') : '尚无发送记录。';
+}
+
+function renderConnections() {
+  const transport = state.transport;
+  if (!transport || typeof transport !== 'object') {
+    $('#serial-state').innerHTML = '<b class="status-dot red"></b>Backend outdated';
+    $('#tcp-state').innerHTML = '<b class="status-dot red"></b>Backend outdated';
+    $('#proxy-state').innerHTML = '<b class="status-dot red"></b>Backend outdated';
+    $('#serial-error').textContent = '当前窗口由旧版后端进程提供服务。请关闭所有 Telemetry Studio 窗口，再重新运行 start.bat。';
+    $('#tcp-error').textContent = '';
+    $('#proxy-error').textContent = '';
+    $('#serial-ports-status').textContent = '后端版本过旧，无法枚举串口。';
+    ['#serial-port', '#serial-port-select', '#serial-baud', '#serial-data-bits',
+     '#tcp-host', '#tcp-port', '#proxy-host', '#proxy-port'].forEach((selector) => { $(selector).disabled = true; });
+    ['#serial-connect', '#serial-disconnect', '#tcp-connect', '#tcp-disconnect',
+     '#proxy-start', '#proxy-stop', '#use-mock'].forEach((selector) => { $(selector).disabled = true; });
+    return;
+  }
+  const serialConnected = transport.kind === 'serial' && transport.connected;
+  const serialSelected = transport.kind === 'serial';
+  const serialLabel = serialConnected ? 'Serial connected' : serialSelected ? 'Serial disconnected' : 'Serial not selected';
+  $('#serial-state').innerHTML = `<b class="status-dot ${serialConnected ? '' : serialSelected ? 'amber' : 'gray'}"></b>${esc(serialLabel)}`;
+  $('#serial-error').textContent = serialSelected ? transport.error || '' : '';
+  ['#serial-port', '#serial-port-select', '#serial-baud', '#serial-data-bits'].forEach((selector) => { $(selector).disabled = serialConnected; });
+  $('#serial-connect').disabled = serialConnected;
+  $('#serial-disconnect').disabled = !serialConnected;
+
+  const tcpConnected = transport.kind === 'tcp' && transport.connected;
+  const tcpSelected = transport.kind === 'tcp';
+  const tcpLabel = tcpConnected ? 'TCP connected' : tcpSelected ? 'TCP disconnected' : 'TCP not selected';
+  $('#tcp-state').innerHTML = `<b class="status-dot ${tcpConnected ? '' : tcpSelected ? 'amber' : 'gray'}"></b>${esc(tcpLabel)}`;
+  $('#tcp-error').textContent = tcpSelected ? transport.error || '' : '';
+  ['#tcp-host', '#tcp-port'].forEach((selector) => { $(selector).disabled = tcpConnected; });
+  $('#tcp-connect').disabled = tcpConnected;
+  $('#tcp-disconnect').disabled = !tcpConnected;
+
+  const proxy = transport.proxy || {};
+  const proxyRunning = !!proxy.running;
+  const proxyError = proxy.error || '';
+  const proxyLabel = proxyRunning ? `Proxy listening · ${proxy.clients || 0}` : proxyError ? 'Proxy error' : 'Proxy stopped';
+  $('#proxy-state').innerHTML = `<b class="status-dot ${proxyRunning ? '' : proxyError ? 'red' : 'gray'}"></b>${esc(proxyLabel)}`;
+  $('#proxy-error').textContent = proxyError;
+  ['#proxy-host', '#proxy-port'].forEach((selector) => { $(selector).disabled = proxyRunning; });
+  $('#proxy-start').disabled = proxyRunning;
+  $('#proxy-stop').disabled = !proxyRunning;
+
+  $('#use-mock').disabled = transport.kind === 'mock' && transport.connected;
+}
+
+function populateConnectionForm() {
+  if (!state || !state.transport || typeof state.transport !== 'object') return;
+  const serial = state.transport.serial || {};
+  $('#serial-port').value = serial.port || 'COM3';
+  $('#serial-baud').value = serial.baudrate || 115200;
+  $('#serial-data-bits').value = String(serial.data_bits || 8);
+  const tcp = state.transport.tcp || {};
+  $('#tcp-host').value = tcp.host || '';
+  $('#tcp-port').value = tcp.port || 9000;
+  const proxy = state.transport.proxy || {};
+  $('#proxy-host').value = proxy.host || '127.0.0.1';
+  $('#proxy-port').value = proxy.port || 9000;
+}
+
+async function refreshSerialPorts(silent = false) {
+  try {
+    const result = await request('serial_ports');
+    const ports = result.ports || [];
+    const options = ports.map((port) => `<option value="${esc(port.device)}">${esc(port.device)} · ${esc(port.description || '')}</option>`).join('');
+    $('#serial-ports').innerHTML = options;
+    $('#serial-port-select').innerHTML = '<option value="">选择检测到的端口…</option>' + options;
+    $('#serial-ports-status').textContent = ports.length ? `检测到 ${ports.length} 个串口` : '未检测到串口，请检查 USB 驱动或设备管理器。';
+    const current = $('#serial-port').value.trim();
+    $('#serial-port-select').value = ports.some((port) => port.device === current) ? current : '';
+  } catch (error) {
+    $('#serial-ports-status').textContent = `枚举失败：${error.message}`;
+    if (!silent) toast(error.message);
+  }
 }
 
 function renderFavorites(symbols) {
@@ -193,6 +273,10 @@ function setView(view) {
     $('#setting-max').value = state.settings.max_channels;
     $('#setting-ram').value = state.settings.ranges.map(([a, b]) => `${address(a)}-${address(b)}`).join('\n');
   }
+  if (view === 'connections' && state) {
+    populateConnectionForm();
+    refreshSerialPorts(true);
+  }
 }
 
 function renderWorkspace() {
@@ -205,6 +289,10 @@ function renderWorkspace() {
     $('#search').value = '';
     $('#firmware-path').value = workspace.firmware_path || '';
     if (currentView === 'settings') setView('settings');
+    if (currentView === 'connections') {
+      populateConnectionForm();
+      refreshSerialPorts(true);
+    }
   }
   $('#workspace-name').textContent = workspace.name;
   $('#workspace-save-dot').className = `status-dot ${workspace.status === 'pending' ? 'amber' : workspace.status === 'error' ? 'red' : ''}`;
@@ -276,7 +364,45 @@ $('#clear-slots').onclick = () => api('slots', {paths:[]});
 $('#copy-hex').onclick = () => copy('hex');
 $('#copy-c').onclick = () => copy('c_array');
 $('#copy-output').onclick = () => copy(outputFormat);
-$('#send').onclick = async () => { const result = await api('send'); if (result) toast('模拟发送成功 · 未发送到真实设备'); };
+$('#send').onclick = async () => {
+  const result = await api('send');
+  if (!result) return;
+  if (result.transport.kind === 'serial') toast(`已通过串口发送 ${result.frame?.size ?? 0} 字节`);
+  else if (result.transport.kind === 'tcp') toast(`已通过 TCP 发送 ${result.frame?.size ?? 0} 字节`);
+  else toast('模拟发送成功 · 未发送到真实设备');
+};
+$('#serial-connect').onclick = async () => {
+  const config = {port:$('#serial-port').value.trim(), baudrate:Number($('#serial-baud').value), data_bits:Number($('#serial-data-bits').value)};
+  const result = await api('transport_connect', {kind:'serial', config});
+  if (!result) return;
+  if (result.transport.error) toast(result.transport.error);
+  else if (result.transport.connected) toast(`串口 ${config.port} 已连接`);
+};
+$('#serial-disconnect').onclick = async () => { const result = await api('transport_disconnect'); if (result) toast('串口已断开'); };
+$('#tcp-connect').onclick = async () => {
+  const config = {host:$('#tcp-host').value.trim(), port:Number($('#tcp-port').value)};
+  const proxy = {host:$('#proxy-host').value.trim(), port:Number($('#proxy-port').value)};
+  const result = await api('transport_connect', {kind:'tcp', config, proxy});
+  if (!result) return;
+  const error = result.transport.error || result.transport.proxy?.error;
+  if (error) toast(error);
+  else if (result.transport.connected) toast(`TCP ${config.host}:${config.port} 已连接`);
+};
+$('#tcp-disconnect').onclick = async () => { const result = await api('transport_disconnect'); if (result) toast('TCP 与本地代理已断开'); };
+$('#proxy-start').onclick = async () => {
+  const config = {host:$('#proxy-host').value.trim(), port:Number($('#proxy-port').value)};
+  const result = await api('proxy_start', {config});
+  if (!result) return;
+  if (result.transport.proxy.error) toast(result.transport.proxy.error);
+  else if (result.transport.proxy.running) toast(`本地代理已监听 ${config.host}:${config.port}`);
+};
+$('#proxy-stop').onclick = async () => { const result = await api('proxy_stop'); if (result) toast('本地代理已停止'); };
+$('#use-mock').onclick = async () => { const result = await api('transport_connect', {kind:'mock'}); if (result) toast('已切换到模拟发送'); };
+$('#serial-refresh').onclick = () => refreshSerialPorts();
+$('#serial-port-select').onchange = () => {
+  const value = $('#serial-port-select').value;
+  if (value) $('#serial-port').value = value;
+};
 $('#save-preset').onclick = () => { if (!state?.slots.length) return toast('请先选择通道'); $('#preset-dialog').showModal(); $('#preset-name').focus(); };
 $('#cancel-preset').onclick = () => $('#preset-dialog').close();
 $('#preset-form').onsubmit = async (e) => { e.preventDefault(); if (await api('save_preset', {name:$('#preset-name').value})) { $('#preset-dialog').close(); toast('预设已保存'); } };

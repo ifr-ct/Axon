@@ -1,14 +1,5 @@
-from dataclasses import dataclass
-from .serial_transport import SerialTransport
+"""Compatibility names for the loopback telemetry proxy (see proxy_server.py)."""
+from .proxy_server import LocalProxyServer, ProxyConfig
 
-
-@dataclass
-class TCPServerConfig:
-    host: str = '0.0.0.0'
-    port: int = 9000
-    max_clients: int = 8
-
-
-class TCPServerTransport(SerialTransport):
-    def connect(self, config):
-        raise NotImplementedError('TCP server transport is planned for V2.')
+TCPServerConfig = ProxyConfig
+TCPServerTransport = LocalProxyServer

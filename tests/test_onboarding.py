@@ -27,7 +27,17 @@ class OnboardingTests(unittest.TestCase):
                 self.assertIn('0xA001', prompt)
                 self.assertIn(f'0x{crc16(b"123456789"):04X}', prompt)
                 self.assertIn('type 6', prompt)
-                self.assertIn('没有真实串口/TCP I/O', prompt)
+                self.assertIn('支持本机串口与 TCP Client 发送', prompt)
+                self.assertIn('127.0.0.1:9000 代理', prompt)
+                self.assertIn('UDP 尚未接入', prompt)
+                self.assertIn('第 0 步：项目勘察', prompt)
+                self.assertIn('从链接脚本推导', prompt)
+                self.assertIn('g_telemetry_build_stamp', prompt)
+                self.assertIn('N=0 非法', prompt)
+                self.assertIn('Cmd 0x00', prompt)
+                self.assertIn('12 通道为 70 bytes', prompt)
+                self.assertIn('安全回退', prompt)
+                self.assertNotIn('STM32H723', prompt)
                 self.assertIn(self.snapshot['frame']['hex'], prompt)
                 self.assertIn('0x12345678', prompt)
 
@@ -36,15 +46,44 @@ class OnboardingTests(unittest.TestCase):
         self.snapshot['frame'] = None
         prompt = generate_prompt('firmware', self.snapshot)
         self.assertIn('Header: 2 bytes = 12 34', prompt)
-        self.assertIn('合法范围 1..8', prompt)
+        self.assertIn('合法范围 1..12', prompt)
+        self.assertIn('当前工作区上限 8', prompt)
         self.assertIn('[0x00001000, 0x00001100)', prompt)
         self.assertNotIn('0x20020000', prompt)
+
+    def test_workspace_limit_above_contract_is_warned(self):
+        snapshot = deepcopy(self.snapshot)
+        snapshot['settings']['max_channels'] = 20
+        prompt = generate_prompt('firmware', snapshot)
+        self.assertIn('合法范围 1..12', prompt)
+        self.assertIn('当前工作区上限 20', prompt)
+        self.assertIn('不得生成或接受超过 12 通道', prompt)
 
     def test_generic_mode_excludes_customer_firmware_and_frame(self):
         prompt = generate_prompt('firmware', self.snapshot, include_context=False)
         for private in ('客户项目', 'customer.axf', '0x12345678', 'g_armed', self.snapshot['frame']['hex']):
             self.assertNotIn(private, prompt)
         self.assertIn('Header: 2 bytes = AA 55', prompt)
+        self.assertNotIn('0x20000000', prompt)
+
+    def test_symbols_and_verification_use_generic_contract(self):
+        symbols = generate_prompt('symbols', self.snapshot)
+        self.assertIn('g_telemetry_build_stamp', symbols)
+        self.assertIn('不是 4 字节', symbols)
+        self.assertIn('链接脚本', symbols)
+        verification = generate_prompt('verification', self.snapshot)
+        self.assertIn('N=0/N=13', verification)
+        self.assertIn('Type 7', verification)
+        self.assertIn('拆包', verification)
+        self.assertIn('粘包', verification)
+        self.assertIn('未执行', verification)
+
+    def test_survey_requires_confirmation_before_code(self):
+        prompt = generate_prompt('firmware', self.snapshot)
+        self.assertIn('等我确认后再改代码', prompt)
+        self.assertIn('必须由我确认', prompt)
+        self.assertIn('未确认前不要实施地址直读', prompt)
+        self.assertIn('固定通道表', prompt)
 
     def test_demo_never_supplies_fake_hardware_frame(self):
         self.snapshot['firmware'] = demo()
