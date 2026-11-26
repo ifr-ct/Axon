@@ -382,9 +382,13 @@ class Bridge:
                 self.manager.connect('mock')
             elif kind == 'serial':
                 config = SerialConfig.from_dict(data.get('config'))
-                self.manager.connect('serial', config)
+                proxy_config = ProxyConfig.from_dict(data['proxy']) if data.get('proxy') is not None else None
+                self.manager.connect('serial', config, proxy_config)
                 self.serial_config = config
                 self.transport_config = {**self.transport_config, 'serial': config.to_dict()}
+                if proxy_config is not None:
+                    self.proxy_config = proxy_config
+                    self.transport_config['proxy'] = proxy_config.to_dict()
                 self.persist()
             elif kind == 'tcp':
                 config = TCPClientConfig.from_dict(data.get('config'))

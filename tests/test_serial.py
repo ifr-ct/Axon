@@ -1,6 +1,9 @@
 from pathlib import Path
 from types import SimpleNamespace
+import socket
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -16,6 +19,8 @@ class FakeSerial:
         self.closed = False
         self.flushes = 0
         self.fail_write = False
+        self.rx = bytearray()
+        self.rx_event = threading.Event()
 
     def write(self, payload):
         if self.fail_write:
@@ -23,11 +28,51 @@ class FakeSerial:
         self.writes.append(bytes(payload))
         return len(payload)
 
+    def read(self, size):
+        if not self.rx:
+            self.rx_event.wait(0.05)
+            self.rx_event.clear()
+            if not self.rx:
+                return b''
+        data = bytes(self.rx[:size])
+        del self.rx[:size]
+        return data
+
+    def feed(self, payload):
+        self.rx.extend(payload)
+        self.rx_event.set()
+
     def flush(self):
         self.flushes += 1
 
     def close(self):
         self.closed = True
+        self.rx_event.set()
+
+
+def free_port():
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        return sock.getsockname()[1]
+
+
+def wait_for(predicate, timeout=2):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def recv_exact(sock, size):
+    data = b''
+    while len(data) < size:
+        chunk = sock.recv(size - len(data))
+        if not chunk:
+            break
+        data += chunk
+    return data
 
 
 class SerialConfigTests(unittest.TestCase):
@@ -51,7 +96,7 @@ class SerialTransportTests(unittest.TestCase):
             self.assertTrue(transport.connect(SerialConfig(port='COM7', baudrate=921600, data_bits=7)))
             self.assertTrue(transport.connected)
             constructor.assert_called_once_with(port='COM7', baudrate=921600, bytesize=7, parity='N',
-                                                stopbits=1, timeout=0, write_timeout=1)
+                                                stopbits=1, timeout=0.1, write_timeout=1)
             self.assertIn('COM7', transport.get_status())
             self.assertTrue(transport.send(b'\xAA\x55\x01'))
             self.assertEqual(fake.writes, [b'\xAA\x55\x01'])
@@ -60,6 +105,17 @@ class SerialTransportTests(unittest.TestCase):
             self.assertTrue(fake.closed)
             self.assertFalse(transport.connected)
             self.assertEqual(transport.get_status(), 'Serial COM7 · Disconnected')
+
+    def test_receive_forwards_bytes(self):
+        fake = FakeSerial()
+        received = []
+        with patch('telemetry.transports.serial_transport.serial.Serial', return_value=fake):
+            transport = SerialTransport()
+            transport.on_receive(received.append)
+            self.assertTrue(transport.connect(SerialConfig(port='COM7')))
+            fake.feed(b'\x10\x20\x30')
+            self.assertTrue(wait_for(lambda: b''.join(received) == b'\x10\x20\x30'))
+            transport.disconnect()
 
     def test_open_failure_is_reported(self):
         with patch('telemetry.transports.serial_transport.serial.Serial', side_effect=OSError('Access denied')):
@@ -171,6 +227,29 @@ class BridgeSerialTests(unittest.TestCase):
             self.assertEqual(state['logs'], [])
         finally:
             restored.close()
+
+    def test_serial_downlink_is_forwarded_to_proxy(self):
+        fake = FakeSerial()
+        proxy_port = free_port()
+        with patch('telemetry.transports.serial_transport.serial.Serial', return_value=fake):
+            result = self.bridge.call('transport_connect', {
+                'kind':'serial',
+                'config':{'port':'COM8', 'baudrate':115200, 'data_bits':8},
+                'proxy':{'host':'127.0.0.1', 'port':proxy_port},
+            })
+        self.assertNotIn('request_error', result)
+        self.assertTrue(result['transport']['connected'])
+        self.assertTrue(result['transport']['proxy']['running'])
+        self.bridge.flush()
+        self.assertEqual(self.storage.read()['transport']['proxy']['port'], proxy_port)
+        viewer = socket.create_connection(('127.0.0.1', proxy_port), timeout=2)
+        viewer.settimeout(2)
+        try:
+            self.assertTrue(wait_for(lambda: self.bridge.manager.proxy.state()['clients'] == 1))
+            fake.feed(b'\xA5\x5A')
+            self.assertEqual(recv_exact(viewer, 2), b'\xA5\x5A')
+        finally:
+            viewer.close()
 
     def test_open_failure_is_visible_and_send_is_blocked(self):
         with patch('telemetry.transports.serial_transport.serial.Serial', side_effect=OSError('Access denied')):

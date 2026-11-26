@@ -373,9 +373,11 @@ $('#send').onclick = async () => {
 };
 $('#serial-connect').onclick = async () => {
   const config = {port:$('#serial-port').value.trim(), baudrate:Number($('#serial-baud').value), data_bits:Number($('#serial-data-bits').value)};
-  const result = await api('transport_connect', {kind:'serial', config});
+  const proxy = {host:$('#proxy-host').value.trim(), port:Number($('#proxy-port').value)};
+  const result = await api('transport_connect', {kind:'serial', config, proxy});
   if (!result) return;
-  if (result.transport.error) toast(result.transport.error);
+  const error = result.transport.error || result.transport.proxy?.error;
+  if (error) toast(error);
   else if (result.transport.connected) toast(`串口 ${config.port} 已连接`);
 };
 $('#serial-disconnect').onclick = async () => { const result = await api('transport_disconnect'); if (result) toast('串口已断开'); };

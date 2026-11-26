@@ -124,7 +124,7 @@ extern "C" const char g_telemetry_build_stamp[] __attribute__((used)) =
 def _axon_block():
     return '''## Axon 上位机边界
 
-Axon 从带 DWARF 的 32 位小端 ARM ELF/AXF 解析静态 RAM 变量，按符号路径绑定通道；支持本机串口与 TCP Client 发送，TCP 下行原始字节可通过本机 127.0.0.1:9000 代理转发给 VOFA+，UDP 尚未接入。串口/TCP 写入成功只代表字节离开主机，不代表固件已接收或生效。
+Axon 从带 DWARF 的 32 位小端 ARM ELF/AXF 解析静态 RAM 变量，按符号路径绑定通道；支持本机串口与 TCP Client 发送，串口/TCP 下行原始字节可通过本机 127.0.0.1:9000 代理转发给 VOFA+，UDP 尚未接入。串口/TCP 写入成功只代表字节离开主机，不代表固件已接收或生效。
 
 此协议只定义“切换遥测数据源”；采样频率、遥测上行格式、ACK、N=0 清空命令和默认数据源都属于具体工程，必须确认，不能假设。'''
 

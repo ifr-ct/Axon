@@ -34,11 +34,11 @@ node --check web/app.js
 - Favorites, presets, and active slots persist as symbol paths only; resolve addresses on every parse. Never store addresses in `.tmws` files.
 - `telemetry/storage.py` owns `.tmws` schema 1 validation and atomic writes (temp file + `fsync` + `os.replace`); `Bridge` debounces autosave at 500ms. Firmware paths are relative to the workspace when possible; global state and the default workspace live under `~/.axf_telemetry/`.
 - `telemetry/onboarding.py` is project-agnostic: protocol and build-stamp fingerprint rules are fixed, while MCU/RTOS/link/receive path/RAM must come from a project survey. Workspace RAM ranges are comparison candidates only; the actual linker script and `.map` are authoritative. Keep the safe fixed-channel-table fallback when RAM cannot be confirmed.
-- `TransportManager` switches between `MockTransport`, a real `SerialTransport`, and a single upstream `TCPClientTransport`. TCP frames are written by the same `send()` path; received bytes are raw-forwarded to `LocalProxyServer` (`127.0.0.1:9000` by default), which broadcasts to VOFA+ clients and ignores their writes. The proxy is receive-only and is auto-started on TCP connect, stopped on disconnect/workspace switch; it never auto-starts on app launch. TCP client settings persist under `transport.tcp`, proxy under `transport.proxy`. Serial is write-only; TCP has no RX parser, ACK, or reconnect. TCP-server names are compatibility aliases for the proxy.
+- `TransportManager` switches between `MockTransport`, a real `SerialTransport`, and a single upstream `TCPClientTransport`. Frames are written by the same `send()` path; bytes received from either serial or TCP are raw-forwarded to `LocalProxyServer` (`127.0.0.1:9000` by default), which broadcasts to VOFA+ clients and ignores their writes. The proxy is receive-only and is auto-started on serial/TCP connect when the UI supplies proxy settings, stopped on disconnect/workspace switch; it never auto-starts on app launch. Serial settings persist under `transport.serial`, TCP under `transport.tcp`, proxy under `transport.proxy`. Neither link parses telemetry, sends ACK, or reconnects automatically; serial uses a bounded reader thread. TCP-server names are compatibility aliases for the proxy.
 
 ## Testing
 
-- Use standard-library `unittest`. Tests build an ARM ELF32/DWARF4 fixture in `tests/elf_fixture.py`, so no cross compiler or real firmware is required. Serial tests patch `serial.Serial`; never open a real COM port in tests. TCP/proxy tests use temporary loopback servers and ephemeral ports; never bind the production proxy port or reach a real vehicle. Real Keil/ARM Compiler output and hardware links still need manual acceptance.
+- Use standard-library `unittest`. Tests build an ARM ELF32/DWARF4 fixture in `tests/elf_fixture.py`, so no cross compiler or real firmware is required. Serial tests patch `serial.Serial` and cover read/forwarding without opening a real COM port. TCP/proxy tests use temporary loopback servers and ephemeral ports; never bind the production proxy port or reach a real vehicle. Real Keil/ARM Compiler output and hardware links still need manual acceptance.
 - `Bridge()` defaults to the real `~/.axf_telemetry`; tests must inject a temporary `Storage` (or `config_dir`) so they never touch a user workspace.
 - UI changes: exercise demo mode, including search, favorites, slot ordering, output copying, and the changed/reload flow. There is no browser automation suite.
 
@@ -51,5 +51,5 @@ node --check web/app.js
 
 ## Status and next work
 
-- Done: build-stamp/fingerprint display, mtime/size change alert, manual reparse with symbol-path rebinding, real serial connect/send, and single TCP client plus local VOFA+ proxy.
+- Done: build-stamp/fingerprint display, mtime/size change alert, manual reparse with symbol-path rebinding, real serial/TCP connect/send, and local VOFA+ proxy for both links.
 - Pending: UDP forwarding and any parsed telemetry-uplink format. Do not invent upstream framing or present the proxy as parsing data.
