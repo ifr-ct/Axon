@@ -3,6 +3,7 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
+import zlib
 
 from telemetry.bridge import Bridge
 from telemetry.protocol import ChannelSlot, crc16, decode, encode, in_ram
@@ -104,8 +105,8 @@ class ParserTests(unittest.TestCase):
             build_elf(path)
             result = parse_firmware(path)
             symbols = {s['path']:s for s in result['symbols']}
-            self.assertEqual(result['fingerprint'], 0x12345678)
-            self.assertEqual(result['fingerprint_source'], 'g_fw_fingerprint')
+            self.assertEqual(result['fingerprint'], zlib.crc32(bytes.fromhex('78563412')))
+            self.assertEqual(result['fingerprint_source'], 'CRC32(g_telemetry_build_stamp)')
             self.assertEqual(symbols['g_imu.roll']['address'], 0x20000004)
             self.assertEqual(symbols['g_values[1][2]']['address'], 0x20000024)
             self.assertEqual(symbols['g_counter']['type_id'], 1)

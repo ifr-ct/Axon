@@ -187,22 +187,19 @@ def parse_firmware(path):
         except ValueError as error:
             warnings.append(f'{label}: {error}')
 
-    fingerprint, source = zlib.crc32(content), 'File CRC32'
+    fingerprint, source = 0, 'Missing g_telemetry_build_stamp'
     symtab = elf.get_section_by_name('.symtab')
     if symtab:
-        for symbol_name in ('g_fw_fingerprint', 'g_build_stamp'):
-            found = False
-            for symbol in symtab.get_symbol_by_name(symbol_name) or []:
-                index = symbol['st_shndx']
-                if not isinstance(index, int) or symbol['st_size'] != 4:
-                    continue
-                section = elf.get_section(index)
-                offset = symbol['st_value'] - section['sh_addr']
-                if section['sh_type'] != 'SHT_NOBITS' and 0 <= offset <= section['sh_size'] - 4:
-                    fingerprint = int.from_bytes(section.data()[offset:offset + 4], 'little')
-                    source, found = symbol_name, True
-                    break
-            if found:
+        for symbol in symtab.get_symbol_by_name('g_telemetry_build_stamp') or []:
+            index = symbol['st_shndx']
+            size = symbol['st_size']
+            if not isinstance(index, int) or size <= 0:
+                continue
+            section = elf.get_section(index)
+            offset = symbol['st_value'] - section['sh_addr']
+            if section['sh_type'] != 'SHT_NOBITS' and 0 <= offset <= section['sh_size'] - size:
+                fingerprint = zlib.crc32(section.data()[offset:offset + size])
+                source = 'CRC32(g_telemetry_build_stamp)'
                 break
     if not rows:
         warnings.append('No supported static RAM leaves found.')

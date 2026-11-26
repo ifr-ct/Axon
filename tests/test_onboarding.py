@@ -15,7 +15,7 @@ class OnboardingTests(unittest.TestCase):
         payload = encode([ChannelSlot(0x20000034, 6)], 0x12345678)
         self.snapshot = dict(settings=dict(header='AA55', max_channels=12, ranges=RAM_RANGES),
                              workspace=dict(name='客户项目'), firmware=dict(name='customer.axf', fingerprint=0x12345678,
-                             fingerprint_source='g_fw_fingerprint'), slots=['g_armed'],
+                             fingerprint_source='CRC32(g_telemetry_build_stamp)'), slots=['g_armed'],
                              frame=dict(hex=payload.hex(' ').upper()), loading=False, changed=False)
 
     def test_templates_match_real_protocol_and_include_valid_frame(self):
