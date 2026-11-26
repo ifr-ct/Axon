@@ -58,10 +58,11 @@ def build_elf(path):
     struct.pack_into('<I', info, 0, len(info) - 4)
     names = b'\0.shstrtab\0.debug_abbrev\0.debug_info\0.data\0.rodata\0.strtab\0.symtab\0'
     strings = b'\0g_telemetry_build_stamp\0'
-    symbol = b'\0' * 16 + struct.pack('<IIIBBH', 1, 0x08000000, 4, 0x11, 0, 5)
+    stamp = b'12345678901234567890\0'
+    symbol = b'\0' * 16 + struct.pack('<IIIBBH', 1, 0x08000000, len(stamp), 0x11, 0, 5)
     sections = [('.shstrtab', 3, 0, 0, names, 0, 0), ('.debug_abbrev', 1, 0, 0, abbrev, 0, 0),
                 ('.debug_info', 1, 0, 0, info, 0, 0), ('.data', 1, 3, 0x20000000, bytes(64), 0, 0),
-                ('.rodata', 1, 2, 0x08000000, struct.pack('<I', 0x12345678), 0, 0),
+                ('.rodata', 1, 2, 0x08000000, stamp, 0, 0),
                 ('.strtab', 3, 0, 0, strings, 0, 0), ('.symtab', 2, 0, 0, symbol, 6, 16)]
     content = bytearray(52)
     headers = [bytes(40)]

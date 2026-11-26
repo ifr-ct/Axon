@@ -198,7 +198,8 @@ def parse_firmware(path):
             section = elf.get_section(index)
             offset = symbol['st_value'] - section['sh_addr']
             if section['sh_type'] != 'SHT_NOBITS' and 0 <= offset <= section['sh_size'] - size:
-                fingerprint = zlib.crc32(section.data()[offset:offset + size])
+                stamp = section.data()[offset:offset + size].split(b'\0', 1)[0]
+                fingerprint = zlib.crc32(stamp)
                 source = 'CRC32(g_telemetry_build_stamp)'
                 break
     if not rows:

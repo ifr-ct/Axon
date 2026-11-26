@@ -105,7 +105,7 @@ class ParserTests(unittest.TestCase):
             build_elf(path)
             result = parse_firmware(path)
             symbols = {s['path']:s for s in result['symbols']}
-            self.assertEqual(result['fingerprint'], zlib.crc32(bytes.fromhex('78563412')))
+            self.assertEqual(result['fingerprint'], zlib.crc32(b'12345678901234567890'))
             self.assertEqual(result['fingerprint_source'], 'CRC32(g_telemetry_build_stamp)')
             self.assertEqual(symbols['g_imu.roll']['address'], 0x20000004)
             self.assertEqual(symbols['g_values[1][2]']['address'], 0x20000024)

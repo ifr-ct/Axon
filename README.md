@@ -155,7 +155,7 @@ python -m venv .venv
 
 V1 支持常量成员偏移和单个 `DW_OP_plus_uconst` 偏移表达式，支持 `DW_ATE_boolean` 编码的 1 字节 bool（包括 typedef/const 包装）；指针、bitfield、动态数组、double、动态位置/location list、C++ 虚继承等不支持的叶子会跳过或提示。递归限制 32 层、100000 个叶子。优化可能删除或改变调试变量；推荐保留调试符号并降低优化。固定地址 ROM 符号不作为可发送变量。
 
-指纹仅对符号表中的 `g_telemetry_build_stamp` 对象内容计算 CRC32，不再对整个 AXF 文件计算 CRC32。该符号应位于已初始化、可读取的段中，并确保目标端采用相同的构建标识字节。
+指纹仅对符号表中的 `g_telemetry_build_stamp` 字符串计算 CRC32，遇到结尾 NUL 即停止（与固件 `strlen` 一致），不再对整个 AXF 文件计算 CRC32。该符号应位于已初始化、可读取的段中，并确保目标端采用相同的构建标识字节。
 
 ## 验证
 
