@@ -33,14 +33,19 @@ function toast(message) {
   toastTimer = setTimeout(() => $('#toast').classList.add('hidden'), 5000);
 }
 
+async function request(action, data = {}) {
+  const response = await fetch('/api', { method: 'POST', headers: {'Content-Type': 'application/json', 'X-Api-Token': $('meta[name="api-token"]').content}, body: JSON.stringify({action, data}) });
+  if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+  const result = await response.json();
+  if (result.request_error) throw new Error(result.request_error);
+  return result;
+}
+
 async function api(action, data = {}, silent = false) {
   if (busy) return;
   busy = true;
   try {
-    const response = await fetch('/api', { method: 'POST', headers: {'Content-Type': 'application/json', 'X-Api-Token': $('meta[name="api-token"]').content}, body: JSON.stringify({action, data}) });
-    if (!response.ok) throw new Error(`Backend returned ${response.status}`);
-    const next = await response.json();
-    if (next.request_error) throw new Error(next.request_error);
+    const next = await request(action, data);
     const serialized = JSON.stringify(next);
     if (serialized !== lastSnapshot) {
       const oldError = state?.error;
@@ -328,6 +333,85 @@ $('#workspace-form').onsubmit = async (event) => {
   if (await api(`workspace_${workspaceDialogAction}`, data)) {
     $('#workspace-dialog').close();
     toast('工作区已更新');
+  }
+};
+
+let integrationKind = 'firmware';
+let integrationRevision = 0;
+let generatedRevision = -1;
+let integrationBusy = false;
+
+function markIntegrationChanged() {
+  integrationRevision += 1;
+  $('#copy-integration').disabled = true;
+  $('#integration-status').textContent = '选项已变化，请生成 / 刷新提示词。';
+}
+
+async function refreshIntegrationPrompt() {
+  if (integrationBusy) return;
+  const revision = integrationRevision;
+  integrationBusy = true;
+  $('#generate-integration').disabled = true;
+  $('#copy-integration').disabled = true;
+  $('#integration-status').textContent = '正在读取当前协议与工作区快照…';
+  try {
+    const result = await request('integration_prompt', {
+      kind: integrationKind, project: $('#integration-project').value,
+      mcu: $('#integration-mcu').value, link: $('#integration-link').value,
+      include_context: $('#integration-context').checked
+    });
+    if (revision !== integrationRevision) return;
+    $('#integration-output').value = result.prompt;
+    $('#integration-output').scrollTop = 0;
+    $('#integration-length').textContent = `${result.prompt.length.toLocaleString()} 字符`;
+    generatedRevision = revision;
+    $('#integration-status').textContent = '已在本地生成。请先预览，再复制到已打开客户工程的 AI 助手；配置变化后需刷新。';
+  } catch (error) {
+    generatedRevision = -1;
+    $('#integration-status').textContent = error.message;
+  } finally {
+    integrationBusy = false;
+    $('#generate-integration').disabled = false;
+    $('#copy-integration').disabled = generatedRevision !== integrationRevision;
+  }
+}
+
+$('#open-integration').onclick = () => {
+  $('#integration-dialog').showModal();
+  markIntegrationChanged();
+  refreshIntegrationPrompt();
+};
+$('#close-integration').onclick = () => $('#integration-dialog').close();
+document.querySelectorAll('[data-prompt-kind]').forEach((button) => {
+  button.onclick = () => {
+    integrationKind = button.dataset.promptKind;
+    document.querySelectorAll('[data-prompt-kind]').forEach((item) => {
+      item.classList.toggle('selected', item === button);
+      item.setAttribute('aria-pressed', String(item === button));
+    });
+    markIntegrationChanged();
+    refreshIntegrationPrompt();
+  };
+});
+['#integration-project', '#integration-mcu', '#integration-link', '#integration-context'].forEach((selector) => {
+  $(selector).addEventListener('input', markIntegrationChanged);
+});
+$('#generate-integration').onclick = refreshIntegrationPrompt;
+$('#copy-integration').onclick = async () => {
+  const preview = $('#integration-output');
+  preview.focus();
+  preview.select();
+  try {
+    // Preserve the click's user activation in embedded desktop browsers.
+    if (!document.execCommand('copy')) {
+      await Promise.race([
+        navigator.clipboard.writeText(preview.value),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Clipboard timeout')), 1500))
+      ]);
+    }
+    toast('已复制接入提示词，可粘贴到你的 AI 编程助手。');
+  } catch {
+    $('#integration-status').textContent = '剪贴板不可用，已选中全文，请按 Ctrl+C 复制。';
   }
 };
 api('state');

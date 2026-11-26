@@ -26,3 +26,32 @@
 #workspace-dialog input { width: 100%; border: 1px solid #e5e5eb; border-radius: 10px; padding: 12px; }
 #workspace-dialog .dialog-actions { margin-top: 22px; }
 @media (max-width: 1150px) { #workspace-name { max-width: 115px; } .top-status { min-width: 0; } }
+.topbar-intro { display: flex; gap: 22px; align-items: center; }
+.topbar-intro > .eyebrow { margin: 0; }
+.integration-entry { display: inline-flex; align-items: center; gap: 7px; padding: 9px 12px; border-radius: 10px; background: #f5f1fb; color: #76618f; font-size: 11px; white-space: nowrap; }
+.integration-entry svg { width: 15px; height: 15px; }
+#integration-dialog { width: min(1040px, 94vw); max-width: 1040px; max-height: 90vh; padding: 26px; overflow: auto; }
+.integration-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 22px; }
+.integration-heading h2 { font-size: 22px; }
+.integration-heading p { font-size: 11px; margin-bottom: 0; }
+.integration-heading .icon-btn { font-size: 24px; line-height: 1; color: #999; }
+.integration-grid { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 24px; }
+.prompt-templates { display: flex; flex-direction: column; gap: 7px; margin-bottom: 20px; }
+.prompt-templates button { text-align: left; padding: 13px; border: 1px solid #eceaf0; border-radius: 12px; }
+.prompt-templates button.selected { border-color: #cbb8e1; background: linear-gradient(135deg, #f1edfa, #faf4ff); }
+.prompt-templates strong { display: block; font-size: 11px; font-weight: 600; }
+.prompt-templates span { display: block; color: #999; font-size: 10px; margin-top: 5px; }
+.integration-options > label { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #888; margin: 13px 0; }
+.integration-options textarea, .integration-options input:not([type=checkbox]), .integration-options select { width: 100%; padding: 10px; border: 1px solid #e5e5eb; border-radius: 9px; background: white; font: inherit; color: #333; resize: vertical; }
+.integration-options > .integration-context { flex-direction: row; align-items: flex-start; line-height: 1.6; gap: 7px; }
+.integration-context input { accent-color: #8b73a5; margin-top: 3px; }
+.integration-context small { display: block; font-size: 9px; color: #aaa; margin-top: 4px; }
+.integration-options .integration-note { padding: 12px; border-radius: 10px; background: #f4f7f5; font-size: 10px; color: #809085; margin: 16px 0 0; }
+.integration-preview { display: flex; flex-direction: column; min-width: 0; }
+.integration-preview h3 { margin: 0; font-size: 13px; }
+#integration-output { flex: 1; min-height: 360px; width: 100%; border: 1px solid #e9e7ed; border-radius: 13px; padding: 17px; font-family: Consolas, 'Microsoft YaHei', monospace; font-size: 11px; line-height: 1.8; color: #55505d; background: #fbfafc; resize: vertical; margin: 13px 0 10px; }
+#integration-status { line-height: 1.7; min-height: 32px; }
+.integration-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: 12px; }
+.integration-actions svg { width: 14px; height: 14px; }
+@media (max-width: 1150px) { .topbar-intro { gap: 10px; } .topbar-intro > .eyebrow { display: none; } }
+@media (max-width: 800px) { .integration-grid { grid-template-columns: 1fr; } #integration-dialog { padding: 20px; } #integration-output { min-height: 350px; } }

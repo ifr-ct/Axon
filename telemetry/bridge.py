@@ -6,6 +6,7 @@ import sys
 import threading
 
 from .parser import demo, parse_firmware
+from .onboarding import generate_prompt
 from .protocol import ChannelSlot, RAM_RANGES, in_ram
 from .storage import Storage, default_workspace, relative_firmware_path
 from .transports import TransportManager
@@ -280,6 +281,11 @@ class Bridge:
     def call(self, action, data=None):
         with self.lock:
             try:
+                if action == 'integration_prompt':
+                    data = data or {}
+                    return {'prompt': generate_prompt(data.get('kind', 'firmware'), self.snapshot(),
+                                                     project=data.get('project', ''), mcu=data.get('mcu', ''),
+                                                     link=data.get('link', ''), include_context=data.get('include_context', True))}
                 self._action(action, data or {})
                 return self.snapshot()
             except Exception as error:

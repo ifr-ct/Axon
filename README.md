@@ -16,6 +16,7 @@ Python + pyelftools + pywebview 后端配合本地 HTML/CSS/JavaScript 仪表盘
 | 多项目 | `.tmws` 工作区、500ms 自动保存、启动恢复及最近 5 个工作区 |
 | 桌面分发 | Windows x64 单文件 EXE，无控制台，无需预装 Python |
 | 示例模式 | 无固件文件即可体验 16 个示例符号与模拟发送日志 |
+| 项目接入助手 | 离线生成固件接入、符号/指纹准备和联调验收提示词，一键复制给客户的 AI 编程助手 |
 
 ## 获取源码
 
@@ -33,6 +34,7 @@ main.py                       pywebview 窗口 / 回环 HTTP 服务
 start.bat                     Windows 一键安装依赖并启动
 telemetry/
   parser.py                   后台 ELF/DWARF 解析 + 示例数据
+  onboarding.py               项目接入提示词模板与当前协议快照
   protocol.py                 ChannelSlot、CRC16、纯函数编解码
   bridge.py                   UI 动作、后台任务、刷新提示与路径重绑定
   storage.py                  app_state.json / .tmws 校验与原子替换写入
@@ -133,6 +135,14 @@ python -m venv .venv
 }
 ```
 
+## AI 项目接入助手
+
+点击顶部“项目接入助手”，选择 **固件接入 / 符号与指纹 / 联调验收**，可补充项目背景、MCU/工具链和计划链路，点击“生成 / 刷新提示词”后预览、一键复制。将提示词粘贴到已打开客户嵌入式工程的 AI 编程助手，指导其依据工程事实完成接入并给出构建和验证步骤。
+
+提示词从当前工作区读取帧头、最大通道数和 RAM 白名单，包含准确字段顺序、CRC 定义、类型枚举（bool 复用 type 6）及指纹一致性要求。勾选“附带工作区名称、固件标识与通道样例”时会附带符号路径及有效帧中的 RAM 地址；取消勾选可去除这些项目快照，当前协议设置仍保留。
+
+该功能完全在本地生成文本，无需 API Key，不自动调用 AI 或上传工程，也不直接修改客户工程。Demo 不提供硬件帧样例，固件解析中或文件已更新时不附带旧帧。预览固定于生成时的快照，协议或固件变化后需要重新生成。V1 的真实串口/TCP 通信和遥测上行格式仍需独立实现或确认；模板会明确这些边界。
+
 ## 线协议
 
 `Header[2] | Cmd=01[1] | Fingerprint LE[4] | N[1] | (Address LE[4], Type[1]) × N | CRC16 LE[2]`
@@ -156,7 +166,7 @@ node --check web/app.js
 
 测试包含 CRC 标准向量、字段字节序、非法帧、RAM 边界、收藏重绑定、预设、mock 发送，以及无需交叉编译器生成的 ARM ELF32/DWARF4 集成夹具。真实 Keil/ARM Compiler 生成物仍需用目标工程验收，尤其是优化后的 C++ 类型和 DWARF 表达式。
 
-当前版本已在 Windows 11 x64 / Python 3.14.3 验证：**25 项 Python 测试通过**，前端 JavaScript 语法检查通过，单文件 EXE 完成窗口启动与 ARM ELF 夹具解析验证。Node.js 仅用于 JavaScript 语法检查，运行桌面程序无需安装 Node.js。
+当前测试覆盖协议、工作区、ARM ELF 夹具，以及接入提示词的自定义协议、Demo/过期帧排除和项目快照开关。Windows 11 x64 / Python 3.14.3 已完成单文件 EXE 窗口启动与 ARM ELF 夹具解析验证。Node.js 仅用于 JavaScript 语法检查，运行桌面程序无需安装 Node.js。
 
 ## 常见问题
 
