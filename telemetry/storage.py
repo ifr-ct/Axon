@@ -6,6 +6,9 @@ import tempfile
 
 from .protocol import RAM_RANGES
 
+WORKSPACE_SUFFIX = '.axon'
+LEGACY_WORKSPACE_SUFFIX = '.tmws'
+
 
 def atomic_write(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -24,6 +27,7 @@ def atomic_write(path: Path, data: dict) -> None:
 
 def default_workspace(name='默认工作区') -> dict:
     return dict(schema_version=1, name=name, axf_path='', mcu_ram_ranges=[list(r) for r in RAM_RANGES],
+                writable_ram_ranges=[],
                 protocol=dict(header='AA55', max_channels=12, crc='CRC-16/MODBUS'),
                 favorites=[], presets={}, active_slots=[], transport={})
 
@@ -53,6 +57,11 @@ def validate_workspace(data: dict) -> dict:
     if not isinstance(ranges, list) or not ranges or not all(isinstance(r, list) and len(r) == 2
             and all(type(n) is int for n in r) and 0 <= r[0] < r[1] <= 0x100000000 for r in ranges):
         raise ValueError('Invalid half-open MCU RAM ranges.')
+    writable = data.get('writable_ram_ranges', [])
+    # Reserved for V2 write access; keep it separate from the read-only mcu_ram_ranges.
+    if not isinstance(writable, list) or not all(isinstance(r, list) and len(r) == 2
+            and all(type(n) is int for n in r) and 0 <= r[0] < r[1] <= 0x100000000 for r in writable):
+        raise ValueError('Invalid optional half-open writable RAM ranges.')
     if not isinstance(data.get('transport'), dict):
         raise ValueError('Workspace transport must be an object.')
     return data
@@ -70,12 +79,18 @@ def relative_firmware_path(firmware: str | None, workspace_path: Path) -> str:
 class Storage:
     def __init__(self, path=None, config_dir=None):
         self.directory = Path(config_dir) if config_dir else Path(path).parent if path else Path.home() / '.axf_telemetry'
-        self.path = Path(path).resolve() if path else (self.directory / 'default.tmws').resolve()
+        self.path = Path(path).resolve() if path else (self.directory / ('default' + WORKSPACE_SUFFIX)).resolve()
         self.app_state_path = self.directory / 'app_state.json'
 
     def read(self, path=None):
         target = Path(path) if path else self.path
+        if path is None and not target.exists() and self.legacy_path.exists():
+            target = self.legacy_path
         return validate_workspace(json.loads(target.read_text(encoding='utf-8')))
+
+    @property
+    def legacy_path(self):
+        return self.path.with_suffix(LEGACY_WORKSPACE_SUFFIX)
 
     def write(self, data, path=None):
         atomic_write(Path(path) if path else self.path, validate_workspace(data))

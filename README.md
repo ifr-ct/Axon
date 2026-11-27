@@ -1,8 +1,19 @@
 # Axon
 
-**面向 ARM 固件的桌面遥测变量配置工具。** 读取 `.axf` / ELF 的 DWARF 调试信息，按符号路径收藏变量，编排通道并生成小端二进制切换帧。当前为 V1 MVP，应用窗口和可执行文件沿用 **Telemetry Studio** 名称。
+<p align="center"><img src="docs/axon-logo.png" alt="Axon logo" width="620"></p>
 
-Python + pyelftools + pywebview + pyserial 后端配合本地 HTML/CSS/JavaScript 仪表盘；无需前端构建、CDN 或数据库。V1 可生成、复制配置帧，并可通过本机串口或 TCP Client 发送；TCP 下行原始字节可由本机 `127.0.0.1:9000` 代理转发给 VOFA+。UDP 转发尚未接入。
+**面向 ARM 固件的桌面遥测变量配置工具。** 读取 `.axf` / ELF 的 DWARF 调试信息，按符号路径收藏变量，编排通道并生成小端二进制切换帧。当前为 **V1.1**，应用窗口、可执行文件和工作区统一使用 **Axon** 名称。
+
+Python + pyelftools + pywebview + pyserial 后端配合本地 HTML/CSS/JavaScript 仪表盘；无需前端构建、CDN 或数据库。V1 可生成、复制配置帧，并可通过本机串口或 TCP Client 发送；串口/TCP 下行原始字节可由本机 `127.0.0.1:9000` 代理转发给 VOFA+。UDP 转发尚未接入。
+
+## v1.1.0 新特性
+
+- **Axon 品牌与命名统一**：窗口、`Axon.exe`、`.axon` 工作区和本机代理文件命名统一；旧 `.tmws` 工作区继续只读兼容并写回原路径。
+- **`.axf` 更新闭环**：后台轻量轮询 mtime/size，自动弹窗选择“已烧录，更新”或“忽略本次更新”；更新后重解析并重绑定收藏/槽位地址。
+- **串口/TCP 共用 Local proxy**：串口或 TCP Client 作为唯一上游，`127.0.0.1:9000` 代理把下行原始字节转发给 VOFA+。
+- **串口热插拔防护**：读线程捕获 `SerialException`/`OSError`，断线状态和错误回传连接页，可刷新端口重连。
+- **受控写入预留**：工作区 Schema 新增可选 `writable_ram_ranges`，与只读 RAM 白名单分离，V1 不参与帧生成。
+- **通用项目接入提示词**：固定协议/指纹契约，先勘察 MCU/RTOS/链路/RAM，从实际链接脚本推导白名单；无法确认时安全回退。
 
 ## 功能概览
 
@@ -13,10 +24,11 @@ Python + pyelftools + pywebview + pyserial 后端配合本地 HTML/CSS/JavaScrip
 | 变量浏览 | 变量树、路径/类型/地址搜索；仅展开相关分支，名称命中的结构体默认折叠 |
 | 通道配置 | 收藏夹、命名预设、拖拽/按钮排序，重编译后按路径匹配最新地址 |
 | 协议帧 | CRC-16/MODBUS、小端编码，HEX / C 数组 / Python Bytes 输出 |
-| 串口发送 | 本机 COM 口连接/断开与配置帧发送；Mock 仅记录日志 |
-| TCP + 本机代理 | 单条 TCP Client 连接车上模块；本机代理把下行原始字节转发给 VOFA+ |
-| 多项目 | `.tmws` 工作区、500ms 自动保存、启动恢复及最近 5 个工作区 |
-| 桌面分发 | Windows x64 单文件 EXE，无控制台，无需预装 Python |
+| 固件更新 | 后台 mtime/size 监听、自动更新/忽略弹窗、烧录确认后重解析 |
+| 串口连接 | 本机 COM 口连接/断开、配置帧发送与下行原始字节转发 |
+| 串口/TCP + 本机代理 | 单条上游连接；本机代理把串口或 TCP 下行原始字节转发给 VOFA+ |
+| 多项目 | `.axon` 工作区（兼容读取旧 `.tmws`）、500ms 自动保存、启动恢复及最近 5 个工作区 |
+| 桌面分发 | Windows x64 单文件 `Axon.exe`，无控制台，无需预装 Python |
 | 示例模式 | 无固件文件即可体验 16 个示例符号与模拟发送日志 |
 | 项目接入助手 | 离线生成固件接入、符号/指纹准备和联调验收提示词，一键复制给客户的 AI 编程助手 |
 
@@ -27,7 +39,7 @@ git clone https://github.com/ifr-ct/Axon.git
 cd Axon
 ```
 
-源代码仓库不包含 `dist/`、虚拟环境、构建缓存、个人 `.tmws` 或真实固件。已有本地 EXE 可直接使用；从 Git 克隆后请按下文运行源码或构建 EXE。
+源代码仓库不包含 `dist/`、虚拟环境、构建缓存、个人 `.axon` / 旧 `.tmws` 或真实固件。已有本地 EXE 可直接使用；从 Git 克隆后请按下文运行源码或构建 EXE。
 
 ## 目录与核心模块
 
@@ -39,20 +51,21 @@ telemetry/
   onboarding.py               项目接入提示词模板与当前协议快照
   protocol.py                 ChannelSlot、CRC16、纯函数编解码
   bridge.py                   UI 动作、后台任务、刷新提示与路径重绑定
-  storage.py                  app_state.json / .tmws 校验与原子替换写入
+  storage.py                  app_state.json / .axon 校验与原子替换写入
   transports/
     base.py                   统一生命周期与接收回调接口
     mock_transport.py         V1 模拟发送、最多保留 200 条日志
-    serial_transport.py       真实串口连接 / 发送（pyserial）
+    serial_transport.py       真实串口连接 / 发送 / 下行接收转发（pyserial）
     tcp_client_transport.py   单条 TCP Client 连接 / 发送 / 接收回调
     proxy_server.py           127.0.0.1 本机代理（转发下行字节给 VOFA+）
-    tcp_server_transport.py   本地代理旧名称兼容别名
     __init__.py               TransportManager 调度
 web/                          HTML、CSS、JavaScript 仪表盘
 tests/                        unittest 与程序生成的 ARM ELF 测试数据
 requirements.txt              Python 依赖
 requirements-build.txt        PyInstaller 构建依赖
-TelemetryStudio.spec          单文件 EXE 打包配置（包含 web 资源）
+Axon.spec                     单文件 EXE 打包配置（包含 web 资源）
+ROADMAP.md                    V1/V2 范围与技术栈决策
+docs/axon-logo.png            README 品牌图
 AGENTS.md                     贡献指南
 ```
 
@@ -60,7 +73,7 @@ AGENTS.md                     贡献指南
 
 ### Windows 单文件 EXE
 
-直接双击 `dist/TelemetryStudio.exe`，无需 BAT、Python 或虚拟环境。可将 EXE 单独复制到其他文件夹；HTML/CSS/JavaScript、Python 运行时与解析依赖已打包。
+直接双击 `dist/Axon.exe`，无需 BAT、Python 或虚拟环境。可将 EXE 单独复制到其他文件夹；HTML/CSS/JavaScript、Python 运行时与解析依赖已打包。
 
 目标系统为 Windows x64，仍需系统安装 Microsoft Edge WebView2 Runtime 和 .NET Framework 4.6.2+（通常 Windows 10/11 已有）。工作区记忆仍保存在用户目录 `~/.axf_telemetry/`，不会写入临时解包目录。单文件首次启动会先解包，可能需要数秒。若启动失败，查看 `~/.axf_telemetry/startup.log`。
 
@@ -69,10 +82,10 @@ AGENTS.md                     贡献指南
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
-.\.venv\Scripts\python.exe -m PyInstaller --noconfirm TelemetryStudio.spec
+.\.venv\Scripts\python.exe -m PyInstaller --noconfirm Axon.spec
 ```
 
-构建结果为 `dist/TelemetryStudio.exe`，可单独复制到其他目录。开发环境已有 `.venv` 时可跳过第一条命令。打包不包含用户配置与工作区；在其他电脑使用时需同时复制自己的 `.tmws` 和对应固件，保持相对目录关系。
+构建结果为 `dist/Axon.exe`，可单独复制到其他目录。开发环境已有 `.venv` 时可跳过第一条命令。打包不包含用户配置与工作区；在其他电脑使用时需同时复制自己的 `.axon`（旧 `.tmws` 仍可打开）和对应固件，保持相对目录关系。
 
 ### 从源码启动
 
@@ -108,31 +121,31 @@ python -m venv .venv
 3. 拖动槽位或使用 ↑/↓ 调序。HEX 按字段着色，可切换 C-Array / Python Bytes，或用黑色快捷按钮复制。
 4. 保存通道预设。收藏与预设仅保存符号路径，加载新版固件后自动解析最新地址；失配显示 Missing，阻止生成错误帧。
 5. 设置页可调整帧头、最大通道数与 RAM 白名单。所有 RAM 区间采用 `[start, end)`；检查变量完整宽度。越界符号标黄且不能从变量树添加。
-6. UI 每 1.2 秒检测文件修改时间及大小；更新提示出现后点击铃铛或侧栏底部刷新。解析在工作线程进行，失败保留上一次有效符号。新固件仍保留原通道路径。
-7. 连接页可连接本机串口，或用 TCP Client 连接车上模块；TCP 连接成功后 Local proxy 默认在 `127.0.0.1:9000` 等待 VOFA+。Mock 仅写日志；串口/TCP 写入成功只代表字节离开主机，不代表固件已接收或生效。
+6. 后台线程每秒检查当前 `.axf` 的修改时间与大小，稳定变化后自动弹出更新提示。选择“已烧录，更新”会重新解析并重绑定收藏/槽位地址；选择“忽略本次更新”后，只有检测到新的文件变化才会再次提示。若点击更新时 Keil 仍在生成文件、文件被占用或尚未落盘，会显示错误并重新等待下一次文件变化，不会卡住监听。解析在工作线程进行，失败保留上一次有效符号。新固件仍保留原通道路径。
+7. 连接页可连接本机串口，或用 TCP Client 连接车上模块；串口/TCP 连接成功后 Local proxy 默认在 `127.0.0.1:9000` 等待 VOFA+。Mock 仅写日志；串口/TCP 写入成功只代表字节离开主机，不代表固件已接收或生效。
 
-### 串口发送
+### 串口连接与转发
 
-在连接页输入或选择 COM 口，设置波特率和数据位后点击“连接串口”。连接成功后帧区按钮变为“串口发送”，按当前配置帧写入串口；写入失败会自动关闭端口并显示错误，需重新连接。点击“切换到模拟发送”可在无硬件时继续使用 Mock。串口配置随工作区保存在 `.tmws` 的 `transport.serial`，启动或切换工作区时不会自动打开端口。
+在连接页输入或选择 COM 口，设置波特率和数据位后点击“连接串口”。连接成功后帧区按钮变为“串口发送”，按当前配置帧写入串口；同时 Local proxy 默认启动，串口收到的下行原始字节会转发给 VOFA+。写入/读取失败会关闭端口并显示错误，需重新连接。点击“切换到模拟发送”可在无硬件时继续使用 Mock。串口配置随工作区保存在 `.axon` 的 `transport.serial`，启动或切换工作区时不会自动打开端口。
 
-当前实现只发送，不读取串口响应，也不提供 ACK、自动重连或流控配置；TXD/RXD 接线、电平、波特率和数据位仍需与固件一致。
+串口下行只按原始字节转发，不解析协议，也不提供 ACK、自动重连或流控配置；TXD/RXD 接线、电平、波特率和数据位仍需与固件一致。
 
-### TCP 上游与本机代理
+### 串口/TCP 上游与本机代理
 
-TCP Client 连接车上模块，只建立一条上游连接。连接成功后 Local proxy 默认监听 `127.0.0.1:9000`，VOFA+ 连接该地址即可查看波形；也可在代理卡片中单独启动、停止或修改监听端口。代理只把上游收到的原始下行字节广播给本机 VOFA+ 客户端，不解析、不回传、不缓存。
+串口或 TCP Client 连接车上模块，只建立一条上游连接。连接成功后 Local proxy 默认监听 `127.0.0.1:9000`，VOFA+ 连接该地址即可查看波形；也可在代理卡片中单独启动、停止或修改监听端口。代理只把上游收到的原始下行字节广播给本机 VOFA+ 客户端，不解析、不回传、不缓存。
 
-TCP 配置保存在 `.tmws` 的 `transport.tcp`，代理配置保存在 `transport.proxy`；启动或切换工作区不会自动连接、监听。当前没有自动重连、心跳、TLS 或 UDP 转发；TCP 连接失败或代理端口被占用会在连接页显示错误。
+串口配置保存在 `.axon` 的 `transport.serial`，TCP 配置保存在 `transport.tcp`，代理配置保存在 `transport.proxy`；启动或切换工作区不会自动连接、监听。当前没有自动重连、心跳、TLS 或 UDP 转发；串口/TCP 连接失败或代理端口被占用会在连接页显示错误。
 
 ## 多项目工作区与启动记忆
 
-右上角工作区切换器显示当前名称与保存状态：绿色为已保存，琥珀色为等待保存，红色为写入失败。菜单提供最近 5 个工作区、新建、打开 `.tmws`、另存为、立即保存及在资源管理器中定位。桌面模式使用原生文件对话框；浏览器模式通过弹窗输入本地文件路径。
+右上角工作区切换器显示当前名称与保存状态：绿色为已保存，琥珀色为等待保存，红色为写入失败。菜单提供最近 5 个工作区、新建、打开 `.axon`、另存为、立即保存及在资源管理器中定位。桌面模式使用原生文件对话框；浏览器模式通过弹窗输入本地文件路径。
 
 - 全局文件为 `~/.axf_telemetry/app_state.json`，只记录 `last_workspace`、最多 5 条去重的 `recent_workspaces` 路径和 `window_size: {width, height}`。
-- 默认项目文件为 `~/.axf_telemetry/default.tmws`；首次启动进入内置空工作区，修改后自动创建默认文件。启动时恢复上次项目并后台解析其固件；工作区文件不存在时回退默认项目。损坏文件保留原样，并进入可“另存为”的内存工作区。
+- 默认项目文件为 `~/.axf_telemetry/default.axon`；启动时若不存在会尝试读取旧版 `default.tmws`。首次启动进入内置空工作区，修改后自动创建默认文件。启动时恢复上次项目并后台解析其固件；工作区文件不存在时回退默认项目。损坏文件保留原样，并进入可“另存为”的内存工作区。
 - 项目修改在最后一次操作后 **500ms** 自动保存；槽位顺序、收藏、预设、协议参数及固件选择都纳入持久化。切换项目和关闭窗口前立即刷新未保存修改。原文件只读时可通过“另存为”恢复保存。
-- `.tmws` 为标准 UTF-8 JSON，使用同目录临时文件、`fsync` 与 `os.replace` 原子替换。固件路径优先相对于 `.tmws` 目录保存，Windows 跨盘符时使用绝对路径；另存为会重新计算相对路径。
+- `.axon` 为标准 UTF-8 JSON，使用同目录临时文件、`fsync` 与 `os.replace` 原子替换。旧版 `.tmws` 可继续打开，保存时默认写回原路径；新建/另存为使用 `.axon`。固件路径优先相对于工作区目录保存，Windows 跨盘符时使用绝对路径；另存为会重新计算相对路径。
 - 固件缺失或解析失败时，项目的收藏与当前槽位仍保留，界面提示 Missing。异步解析旧项目的结果不会覆盖新项目。示例模式的符号只存在于内存，重新启动后可再次点击“加载示例符号”。
-- 原版 `%LOCALAPPDATA%\TelemetryStudio\settings.json` 保留原样；如有旧收藏，可将其符号路径复制至新 `.tmws` 的相应字段。
+- 旧版全局设置目录保留原样；如有旧收藏，可将其符号路径复制至新 `.axon` 的相应字段。
 
 示例项目文件（RAM 区间采用半开区间，收藏与槽位仅存路径）：
 
@@ -142,6 +155,7 @@ TCP 配置保存在 `.tmws` 的 `transport.tcp`，代理配置保存在 `transpo
   "name": "WheelLeg 调试",
   "axf_path": "build/WheelLeg.axf",
   "mcu_ram_ranges": [[536870912, 537001984], [603979776, 604504064], [805306368, 805601280]],
+  "writable_ram_ranges": [],
   "protocol": {"header": "AA55", "max_channels": 12, "crc": "CRC-16/MODBUS"},
   "favorites": ["g_imu.pitch_rad"],
   "presets": {"姿态": ["g_imu.pitch_rad", "g_system.armed"]},
@@ -149,6 +163,8 @@ TCP 配置保存在 `.tmws` 的 `transport.tcp`，代理配置保存在 `transpo
   "transport": {}
 }
 ```
+
+`writable_ram_ranges` 是为 V2 受控在线写入预留的可选字段，默认空；它与只读 `mcu_ram_ranges` 物理分离，当前不参与帧生成或发送。
 
 ## AI 项目接入助手
 
@@ -181,9 +197,9 @@ V1 支持常量成员偏移和单个 `DW_OP_plus_uconst` 偏移表达式，支�
 node --check web/app.js
 ```
 
-测试包含 CRC 标准向量、字段字节序、非法帧、RAM 边界、收藏重绑定、预设、Mock/串口/TCP 发送，以及 TCP 回环代理转发和无需交叉编译器生成的 ARM ELF32/DWARF4 集成夹具。串口测试通过伪造 `serial.Serial` 验证连接、写入、断开和错误路径，不访问真实 COM 口；TCP/代理测试使用临时回环端口。真实 Keil/ARM Compiler 生成物仍需用目标工程验收，尤其是优化后的 C++ 类型和 DWARF 表达式。
+测试包含 CRC 标准向量、字段字节序、非法帧、RAM 边界、收藏重绑定、预设、Mock/串口/TCP 发送、`.axf` 后台侦测与烧录确认重解析，以及串口/TCP 回环代理转发和无需交叉编译器生成的 ARM ELF32/DWARF4 集成夹具。串口测试通过伪造 `serial.Serial` 验证连接、写入、接收、断开和错误路径，不访问真实 COM 口；TCP/代理测试使用临时回环端口。真实 Keil/ARM Compiler 生成物仍需用目标工程验收，尤其是优化后的 C++ 类型和 DWARF 表达式。
 
-当前测试覆盖协议、工作区、ARM ELF 夹具、串口传输、TCP 上游与本机代理，以及接入提示词的自定义协议、Demo/过期帧排除和项目快照开关。Windows 11 x64 / Python 3.14.3 已完成单文件 EXE 窗口启动与 ARM ELF 夹具解析验证。Node.js 仅用于 JavaScript 语法检查，运行桌面程序无需安装 Node.js。
+当前测试覆盖协议、工作区、ARM ELF 夹具、串口传输、TCP 上游与串口/TCP 本机代理，以及接入提示词的自定义协议、Demo/过期帧排除和项目快照开关。Windows 11 x64 / Python 3.14.3 已完成单文件 EXE 窗口启动与 ARM ELF 夹具解析验证。Node.js 仅用于 JavaScript 语法检查，运行桌面程序无需安装 Node.js。
 
 ## 常见问题
 
@@ -191,13 +207,15 @@ node --check web/app.js
 - **收藏显示 Missing**：收藏按路径绑定；固件改名、成员删除或编译单元路径变更后，需重新选择变量。
 - **帧无法生成**：至少选择 1 个通道，且槽位数量、类型和完整地址范围必须符合当前项目设置。Missing 和 RAM 越界都会阻止生成。
 - **工作区保存失败**：查看切换器中的错误信息，检查目录写权限；可通过“另存为”保存到其他位置。
-- **串口连接/发送失败**：确认 COM 口未被其他程序占用、波特率和数据位匹配固件；发送失败会自动关闭端口，需重新连接。串口写入成功不等于固件已接收或生效。
-- **TCP 连接/代理失败**：确认车上模块已监听目标 host:port；代理端口被占用、上游断开或 VOFA+ 未连接都会显示在连接页。代理只转发已收到的下行字节，不回传、不缓存。
+- **串口连接/发送/转发失败**：确认 COM 口未被其他程序占用、波特率和数据位匹配固件；发送或接收失败会自动关闭端口并显示错误，需重新连接，可用“刷新端口”重新枚举。串口下行原始字节会转发给本机代理；写入成功不等于固件已接收或生效。
+- **TCP 连接/代理失败**：确认车上模块已监听目标 host:port；代理端口被占用、上游断开或 VOFA+ 未连接都会显示在连接页。代理只转发已收到的串口/TCP 下行字节，不回传、不缓存。
 - **EXE 启动失败**：确认系统具备 WebView2 Runtime 和 .NET Framework，查看 `~/.axf_telemetry/startup.log`。无需复制 `.venv` 或 `web/` 到 EXE 旁边。
 
 ## 后续扩展与贡献
 
-`BaseTransport` 与 `TransportManager` 已接入真实串口与单条 TCP Client；本机代理把 TCP 下行原始字节转发给 VOFA+。UDP 转发仍为后续方向；V1 不解析遥测上行格式，串口为只写，串口/TCP 写入成功不代表固件已接收或生效。
+`BaseTransport` 与 `TransportManager` 已接入真实串口与单条 TCP Client；本机代理把串口或 TCP 下行原始字节转发给 VOFA+。UDP 转发仍为后续方向；V1 不解析遥测上行格式，串口/TCP 写入成功不代表固件已接收或生效。
+
+V1 命名/安全边界/串口热插拔进度，以及 V2 P1–P4 规划和技术栈取舍见 [ROADMAP.md](ROADMAP.md)。
 
 贡献前请阅读 [AGENTS.md](AGENTS.md)，修改核心逻辑后运行测试。反馈解析问题时，请说明芯片、编译器、优化等级和 DWARF 版本，并提供可公开的最小复现；请勿提交私有固件、个人工作区或凭据。
 

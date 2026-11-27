@@ -49,12 +49,14 @@ async function api(action, data = {}, silent = false) {
     const serialized = JSON.stringify(next);
     if (serialized !== lastSnapshot) {
       const oldError = state?.error;
+      const wasChanged = state?.changed;
       const workspaceOnly = state && JSON.stringify({...state, workspace:undefined}) === JSON.stringify({...next, workspace:undefined});
       state = next;
       lastSnapshot = serialized;
       if (workspaceOnly) renderWorkspace();
       else render();
       if (state.error && state.error !== oldError) toast(state.error);
+      if (state.changed && !wasChanged) openReparseDialog();
     }
     return next;
   } catch (error) {
@@ -80,7 +82,7 @@ function render() {
   $('#load-state').textContent = state.loading ? 'Parsing DWARF in background…' : firmware ? `${firmware.symbols.length} variables · ${firmware.fingerprint_source}` : 'ELF + DWARF · ARM Cortex';
   ['#load', '#browse', '#demo', '#reload'].forEach((id) => { $(id).disabled = state.loading; });
   $('#change-alert .dot').classList.toggle('hidden', !state.changed);
-  $('#change-alert').title = state.changed ? '固件已更新，点击重新加载' : '固件文件未变更';
+  $('#change-alert').title = state.changed ? '固件已更新，请确认已烧录后重新解析' : '固件文件未变更';
   $('#fingerprint').textContent = firmware ? address(firmware.fingerprint) : '0x————————';
   $('#fingerprint-source').textContent = firmware ? firmware.fingerprint_source : '等待加载固件';
   $('#frame-status').outerHTML = `<span id="frame-status">${pill(state.frame ? 'Valid' : state.slots.length ? 'Invalid' : 'Empty', state.frame ? '' : state.slots.length ? 'amber' : 'gray')}</span>`;
@@ -116,7 +118,7 @@ function renderConnections() {
     $('#serial-state').innerHTML = '<b class="status-dot red"></b>Backend outdated';
     $('#tcp-state').innerHTML = '<b class="status-dot red"></b>Backend outdated';
     $('#proxy-state').innerHTML = '<b class="status-dot red"></b>Backend outdated';
-    $('#serial-error').textContent = '当前窗口由旧版后端进程提供服务。请关闭所有 Telemetry Studio 窗口，再重新运行 start.bat。';
+    $('#serial-error').textContent = '当前窗口由旧版后端进程提供服务。请关闭所有 Axon 窗口，再重新运行 start.bat。';
     $('#tcp-error').textContent = '';
     $('#proxy-error').textContent = '';
     $('#serial-ports-status').textContent = '后端版本过旧，无法枚举串口。';
@@ -185,6 +187,22 @@ async function refreshSerialPorts(silent = false) {
     $('#serial-ports-status').textContent = `枚举失败：${error.message}`;
     if (!silent) toast(error.message);
   }
+}
+
+function openReparseDialog() {
+  if (!state?.changed) {
+    toast('固件文件未变更');
+    return;
+  }
+  const dialog = $('#reparse-dialog');
+  if (dialog.open) return;
+  if (document.querySelector('dialog[open]')) {
+    toast('检测到 .axf 更新，请先关闭当前对话框后处理。');
+    return;
+  }
+  $('#reparse-file').textContent = state.workspace?.firmware_path || state.firmware?.name || '当前固件';
+  $('#reparse-fingerprint').textContent = state.firmware ? address(state.firmware.fingerprint) : '—';
+  dialog.showModal();
 }
 
 function renderFavorites(symbols) {
@@ -353,8 +371,17 @@ $('#empty-demo').onclick = () => api('demo');
 $('#load').onclick = () => api('load', {path:$('#firmware-path').value.trim().replace(/^"|"$/g, '')});
 $('#firmware-path').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#load').click(); });
 $('#browse').onclick = () => api('browse');
-$('#reload').onclick = () => api('reload');
-$('#change-alert').onclick = () => { if (state?.changed) api('reload'); else toast('固件文件未变更'); };
+$('#reload').onclick = () => { if (state?.changed) openReparseDialog(); else api('reload'); };
+$('#change-alert').onclick = () => { if (state?.changed) openReparseDialog(); else toast('固件文件未变更'); };
+$('#ignore-reparse').onclick = async () => {
+  $('#reparse-dialog').close();
+  const result = await api('ignore_change');
+  if (result) toast('已忽略本次更新；文件再次变化时会重新提示。');
+};
+$('#confirm-reparse').onclick = async () => {
+  $('#reparse-dialog').close();
+  await api('reload', {confirmed:true});
+};
 $('#search').addEventListener('input', () => {
   searchBranchOverrides.clear();
   if (state) { renderFavorites(symbolMap()); renderTree(); }
@@ -373,9 +400,11 @@ $('#send').onclick = async () => {
 };
 $('#serial-connect').onclick = async () => {
   const config = {port:$('#serial-port').value.trim(), baudrate:Number($('#serial-baud').value), data_bits:Number($('#serial-data-bits').value)};
-  const result = await api('transport_connect', {kind:'serial', config});
+  const proxy = {host:$('#proxy-host').value.trim(), port:Number($('#proxy-port').value)};
+  const result = await api('transport_connect', {kind:'serial', config, proxy});
   if (!result) return;
-  if (result.transport.error) toast(result.transport.error);
+  const error = result.transport.error || result.transport.proxy?.error;
+  if (error) toast(error);
   else if (result.transport.connected) toast(`串口 ${config.port} 已连接`);
 };
 $('#serial-disconnect').onclick = async () => { const result = await api('transport_disconnect'); if (result) toast('串口已断开'); };

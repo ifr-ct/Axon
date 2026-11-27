@@ -123,11 +123,70 @@ class ParserTests(unittest.TestCase):
             build_elf(path)
             bridge = Bridge(Storage(Path(directory) / 'settings.json'))
             try:
+                bridge.watch_interval = 0.05
+                bridge.watch_settle = 0.02
                 bridge.call('load', {'path':str(path)})
                 bridge.future.result(timeout=5)
                 self.assertFalse(bridge.call('state')['loading'])
                 path.write_bytes(path.read_bytes() + b'new build')
+                deadline = time.time() + 3
+                while time.time() < deadline and not bridge.changed:
+                    time.sleep(0.02)
+                self.assertTrue(bridge.changed)
                 self.assertTrue(bridge.call('state')['changed'])
+                ignored = bridge.call('ignore_change')
+                self.assertFalse(ignored['changed'])
+                time.sleep(0.2)
+                self.assertFalse(bridge.changed)
+                self.assertFalse(bridge.call('state')['changed'])
+
+                path.write_bytes(path.read_bytes() + b'newer build')
+                deadline = time.time() + 3
+                while time.time() < deadline and not bridge.changed:
+                    time.sleep(0.02)
+                self.assertTrue(bridge.changed)
+                self.assertIn('request_error', bridge.call('reload'))
+                self.assertNotIn('request_error', bridge.call('reload', {'confirmed': True}))
+                if bridge.future:
+                    bridge.future.result(timeout=5)
+                result = bridge.call('state')
+                self.assertFalse(result['changed'])
+                self.assertEqual(result['firmware']['name'], 'fixture.axf')
+            finally:
+                bridge.close()
+
+    def test_reload_while_axf_is_missing_rearms_watcher(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'fixture.axf'
+            build_elf(path)
+            original = path.read_bytes()
+            bridge = Bridge(Storage(Path(directory) / 'settings.json'))
+            try:
+                bridge.watch_interval = 0.05
+                bridge.watch_settle = 0.02
+                bridge.call('load', {'path':str(path)})
+                if bridge.future:
+                    bridge.future.result(timeout=5)
+                bridge.call('state')
+                path.unlink()
+                deadline = time.time() + 3
+                while time.time() < deadline and not bridge.changed:
+                    time.sleep(0.02)
+                self.assertTrue(bridge.changed)
+                result = bridge.call('reload', {'confirmed': True})
+                self.assertFalse(result['changed'])
+                self.assertIn('not available', result['error'])
+
+                path.write_bytes(original + b'rebuilt')
+                deadline = time.time() + 3
+                while time.time() < deadline and not bridge.changed:
+                    time.sleep(0.02)
+                self.assertTrue(bridge.changed)
+                result = bridge.call('reload', {'confirmed': True})
+                self.assertNotIn('request_error', result)
+                if bridge.future:
+                    bridge.future.result(timeout=5)
+                self.assertFalse(bridge.call('state')['changed'])
             finally:
                 bridge.close()
 

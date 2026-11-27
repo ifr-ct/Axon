@@ -1,4 +1,4 @@
-"""Real serial transport built on pyserial; receiving remains for later work."""
+"""Real serial transport built on pyserial, with raw receive forwarding."""
 from dataclasses import dataclass
 import threading
 
@@ -46,6 +46,8 @@ class SerialTransport(BaseTransport):
         self.lock = threading.RLock()
         self.port = None
         self.config = None
+        self.thread = None
+        self.stop_event = threading.Event()
 
     def connect(self, config):
         if serial is None:
@@ -57,35 +59,68 @@ class SerialTransport(BaseTransport):
         except ValueError as error:
             self.error = str(error)
             return False
+        self.disconnect()
         with self.lock:
-            self._close_locked()
             self.config = config
             self.error = ''
             try:
                 self.port = serial.Serial(port=config.port, baudrate=config.baudrate,
                                           bytesize=config.data_bits, parity=serial.PARITY_NONE,
-                                          stopbits=serial.STOPBITS_ONE, timeout=0, write_timeout=1)
+                                          stopbits=serial.STOPBITS_ONE, timeout=0.1, write_timeout=1)
             except (serial.SerialException, OSError, ValueError) as error:
                 self.port = None
                 self.connected = False
                 self.error = f'Cannot open serial port {config.port}: {error}'
                 return False
             self.connected = True
-            return True
+            self.stop_event.clear()
+            self.thread = threading.Thread(target=self._read_loop, args=(self.port,), daemon=True)
+            self.thread.start()
+        return True
 
-    def _close_locked(self):
-        port, self.port = self.port, None
-        self.connected = False
+    def _read_loop(self, port):
+        while not self.stop_event.is_set():
+            try:
+                data = port.read(4096)
+            except (serial.SerialException, OSError) as error:
+                self._fail(f'Serial receive failed: {error}', port)
+                break
+            if not data:
+                continue
+            callback = self.callback
+            if callback:
+                try:
+                    callback(data)
+                except Exception:
+                    pass
+
+    def _fail(self, message, port):
+        with self.lock:
+            if self.stop_event.is_set() or port is not self.port:
+                return
+            self.port = None
+            self.connected = False
+            self.error = message
+        try:
+            port.close()
+        except (serial.SerialException, OSError):
+            pass
+
+    def disconnect(self):
+        self.stop_event.set()
+        with self.lock:
+            port, self.port = self.port, None
+            self.connected = False
+            self.error = ''
+            thread = self.thread
+            self.thread = None
         if port:
             try:
                 port.close()
             except (serial.SerialException, OSError):
                 pass
-
-    def disconnect(self):
-        with self.lock:
-            self._close_locked()
-            self.error = ''
+        if thread and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=1)
 
     def send(self, payload: bytes) -> bool:
         with self.lock:
@@ -98,8 +133,14 @@ class SerialTransport(BaseTransport):
                     raise OSError(f'wrote {written} of {len(payload)} bytes')
                 self.port.flush()
             except (serial.SerialException, OSError) as error:
+                self.stop_event.set()
+                port, self.port = self.port, None
+                self.connected = False
                 self.error = f'Serial send failed: {error}'
-                self._close_locked()
+                try:
+                    port.close()
+                except (serial.SerialException, OSError):
+                    pass
                 return False
             self.error = ''
             return True

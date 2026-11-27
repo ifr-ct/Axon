@@ -63,3 +63,20 @@
 #serial-error { margin: 8px 0 0; }
 #serial-ports-status { margin: -5px 0 15px; }
 #use-mock { margin-top: 10px; }
+
+.brand { letter-spacing: 0; padding-right: 0; }
+
+#reparse-dialog p { line-height: 1.7; }
+#reparse-file { overflow-wrap: anywhere; }
+
+.update-dialog { width: min(500px, 94vw); padding: 26px; }
+.update-dialog-head { display: flex; align-items: center; gap: 14px; margin-bottom: 4px; }
+.update-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 13px; background: #f2eef8; color: #6f5a8c; flex: none; }
+.update-icon svg { width: 20px; height: 20px; }
+.update-dialog-head .eyebrow { margin: 0 0 4px; color: #a292b5; }
+.update-dialog-head h2 { font-size: 20px; }
+.update-meta { display: grid; gap: 8px; background: #f8f7fb; border-radius: 12px; padding: 12px 14px; margin: 16px 0; }
+.update-meta div { display: flex; justify-content: space-between; gap: 12px; font-size: 10px; color: #999; }
+.update-meta strong { font-weight: 500; color: #555; max-width: 70%; overflow-wrap: anywhere; text-align: right; }
+.update-warning { font-size: 10px; color: #8a7a9a; background: #fbf8fe; border-left: 2px solid #cbb8e1; padding: 8px 10px; border-radius: 0 8px 8px 0; }
+.update-dialog .dialog-actions { margin-top: 18px; align-items: center; }

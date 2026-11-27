@@ -21,7 +21,7 @@ exe = EXE(
     analysis.binaries,
     analysis.datas,
     [],
-    name='TelemetryStudio',
+    name='Axon',
     debug=False,
     strip=False,
     upx=False,

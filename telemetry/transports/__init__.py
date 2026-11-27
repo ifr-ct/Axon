@@ -23,8 +23,10 @@ class TransportManager:
             raise ValueError('Unknown transport type.')
         serial_config = None
         tcp_config = None
+        serial_proxy_config = None
         if kind == 'serial':
             serial_config = SerialConfig.from_dict(config)
+            serial_proxy_config = ProxyConfig.from_dict(proxy_config) if proxy_config is not None else None
         elif kind == 'tcp':
             tcp_config = TCPClientConfig.from_dict(config)
             proxy_config = ProxyConfig.from_dict(proxy_config) if proxy_config is not None else self.proxy_config
@@ -36,7 +38,11 @@ class TransportManager:
             connected = transport.connect({})
         elif kind == 'serial':
             transport = SerialTransport()
+            transport.on_receive(self._on_receive)
             connected = transport.connect(serial_config)
+            if connected and serial_proxy_config is not None:
+                self.proxy_config = serial_proxy_config
+                self.start_proxy(serial_proxy_config)
         else:
             self.tcp_config = tcp_config
             self.proxy_config = proxy_config
