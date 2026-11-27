@@ -8,7 +8,8 @@ import threading
 from .parser import demo, parse_firmware
 from .onboarding import generate_prompt
 from .protocol import ChannelSlot, RAM_RANGES, in_ram
-from .storage import Storage, default_workspace, relative_firmware_path
+from .storage import (LEGACY_WORKSPACE_SUFFIX, WORKSPACE_SUFFIX, Storage, default_workspace,
+                      relative_firmware_path)
 from .transports import ProxyConfig, SerialConfig, TCPClientConfig, TransportManager, list_serial_ports
 
 
@@ -36,6 +37,7 @@ class Bridge:
         self.serial_config = SerialConfig()
         self.tcp_config = TCPClientConfig()
         self.proxy_config = ProxyConfig()
+        self.writable_ram_ranges = []
         self.window = None
         self.workspace_path = self.storage.path
         self.workspace_name = '默认工作区'
@@ -45,10 +47,19 @@ class Bridge:
         self.save_timer = None
         self.save_generation = 0
         self.workspace_generation = 0
+        self.changed = False
+        self.ignored_active = False
+        self.ignored_stamp = None
+        self.watch_interval = 1.0
+        self.watch_settle = 0.5
+        self.watch_stop = threading.Event()
+        self.watch_thread = None
         global_error = self.error
         try:
             last = self.app_state['last_workspace']
             target = Path(last) if last and Path(last).is_file() else self.storage.path
+            if not target.is_file() and target == self.storage.path and self.storage.legacy_path.is_file():
+                target = self.storage.legacy_path
             document = self.storage.read(target) if target.is_file() else default_workspace()
             self._activate_workspace(document, target)
         except (ValueError, OSError, TypeError) as error:
@@ -90,6 +101,7 @@ class Bridge:
         return dict(schema_version=1, name=self.workspace_name,
                     axf_path=relative_firmware_path(self.path, target),
                     mcu_ram_ranges=self.settings['ranges'],
+                    writable_ram_ranges=list(self.writable_ram_ranges),
                     protocol={k: self.settings[k] for k in ('header', 'max_channels', 'crc')},
                     favorites=list(self.saved['favorites']),
                     presets={k: list(v) for k, v in self.saved['presets'].items()},
@@ -140,14 +152,78 @@ class Bridge:
                 self.flush()
                 self._remember_workspace()
         finally:
+            self.watch_stop.set()
+            thread, self.watch_thread = self.watch_thread, None
+            if thread and thread.is_alive() and thread is not threading.current_thread():
+                thread.join(timeout=2)
             self.manager.disconnect()
             self.pool.shutdown(wait=False, cancel_futures=True)
 
     def _start_parse(self, path):
-        stat = Path(path).stat()
+        try:
+            stat = Path(path).stat()
+        except OSError:
+            self.changed = False
+            self.ignored_active = bool(self.path and self.stamp)
+            self.ignored_stamp = self._file_stamp(self.path) if self.ignored_active else None
+            raise
         self.loading_path = str(Path(path).resolve())
         self.loading_stamp = (stat.st_mtime_ns, stat.st_size)
+        self.changed = False
+        self.ignored_active = False
+        self.ignored_stamp = None
         self.future = self.pool.submit(parse_firmware, self.loading_path)
+        self._ensure_watcher()
+
+    @staticmethod
+    def _file_stamp(path):
+        try:
+            stat = Path(path).stat()
+            return (stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            return None
+
+    def _current_change(self):
+        if not self.path or not self.stamp:
+            return False
+        current = self._file_stamp(self.path)
+        if self.ignored_active:
+            if current == self.ignored_stamp:
+                return False
+            self.ignored_active = False
+            self.ignored_stamp = None
+        return current != self.stamp
+
+    def _ensure_watcher(self):
+        if self.watch_thread and self.watch_thread.is_alive():
+            return
+        self.watch_stop.clear()
+        self.watch_thread = threading.Thread(target=self._watch_loop, daemon=True)
+        self.watch_thread.start()
+
+    def _watch_loop(self):
+        while not self.watch_stop.wait(self.watch_interval):
+            with self.lock:
+                if self.future or not self.path or not self.stamp or self.changed:
+                    continue
+                path, stamp = self.path, self.stamp
+                if self.ignored_active and self._file_stamp(path) == self.ignored_stamp:
+                    continue
+                if self.ignored_active:
+                    self.ignored_active = False
+                    self.ignored_stamp = None
+            first = self._file_stamp(path)
+            if first == stamp:
+                continue
+            if self.watch_stop.wait(self.watch_settle):
+                return
+            if self._file_stamp(path) != first:
+                continue
+            with self.lock:
+                if self.ignored_active and self._file_stamp(path) == self.ignored_stamp:
+                    continue
+                if not self.future and path == self.path and stamp == self.stamp:
+                    self.changed = True
 
     def _activate_workspace(self, document, path):
         if self.future:
@@ -159,12 +235,16 @@ class Bridge:
         self.settings = self.validate_settings({**document['protocol'], 'ranges': document['mcu_ram_ranges']})
         self.saved = dict(favorites=list(document['favorites']), presets={k: list(v) for k, v in document['presets'].items()})
         self.slots = list(document['active_slots'])
+        self.writable_ram_ranges = [[int(a), int(b)] for a, b in document.get('writable_ram_ranges', [])]
         self.transport_config = dict(document['transport'])
         self.serial_config = SerialConfig()
         self.tcp_config = TCPClientConfig()
         self.proxy_config = ProxyConfig()
         self.manager.reset()
         self.firmware, self.path, self.stamp = None, None, None
+        self.changed = False
+        self.ignored_active = False
+        self.ignored_stamp = None
         self.error, self.save_error, self.dirty = '', '', False
         for key, factory, attribute in (('serial', SerialConfig.from_dict, 'serial_config'),
                                         ('tcp', TCPClientConfig.from_dict, 'tcp_config'),
@@ -187,11 +267,13 @@ class Bridge:
 
     def _workspace_dialog(self, save=False):
         if not self.window:
-            raise ValueError('Enter a .tmws path in browser mode.')
+            raise ValueError(f'Enter an {WORKSPACE_SUFFIX} path in browser mode.')
         import webview
-        options = dict(file_types=('Telemetry workspace (*.tmws)',))
+        file_types = (f'Axon workspace (*{WORKSPACE_SUFFIX})',) if save else (
+            f'Axon workspace (*{WORKSPACE_SUFFIX})', f'Legacy workspace (*{LEGACY_WORKSPACE_SUFFIX})')
+        options = dict(file_types=file_types)
         if save:
-            options['save_filename'] = self.workspace_name + '.tmws'
+            options['save_filename'] = self.workspace_name + WORKSPACE_SUFFIX
         result = self.window.create_file_dialog(webview.FileDialog.SAVE if save else webview.FileDialog.OPEN, **options)
         if isinstance(result, (tuple, list)):
             return result[0] if result else None
@@ -217,10 +299,12 @@ class Bridge:
         if not path:
             return
         target = Path(path).expanduser().resolve()
-        if action != 'workspace_open' and target.suffix.lower() != '.tmws':
-            target = target.with_suffix('.tmws')
-        if target.suffix.lower() != '.tmws':
-            raise ValueError('Choose a .tmws workspace file.')
+        if action == 'workspace_open':
+            if target.suffix.lower() not in (WORKSPACE_SUFFIX, LEGACY_WORKSPACE_SUFFIX):
+                raise ValueError(f'Choose an {WORKSPACE_SUFFIX} workspace file; legacy {LEGACY_WORKSPACE_SUFFIX} files may be opened.')
+        else:
+            if target.suffix.lower() != WORKSPACE_SUFFIX:
+                target = target.with_suffix(WORKSPACE_SUFFIX)
         if action == 'workspace_open':
             document = self.storage.read(target)  # Validate fully before leaving current workspace.
             self.flush()
@@ -261,17 +345,17 @@ class Bridge:
                 self.firmware = loaded
                 self.stamp = self.loading_stamp
                 self.path = self.loading_path
+                self.changed = False
+                self.ignored_active = False
+                self.ignored_stamp = None
                 self.error = ''
                 self.persist()
             except Exception as error:
                 self.error = str(error)
-        changed = False
-        if self.path and self.stamp:
-            try:
-                stat = Path(self.path).stat()
-                changed = (stat.st_mtime_ns, stat.st_size) != self.stamp
-            except OSError:
-                changed = True
+                self.changed = False
+                self.ignored_active = bool(self.path and self.stamp)
+                self.ignored_stamp = self._file_stamp(self.path) if self.ignored_active else None
+        changed = self.changed
         firmware = None
         if self.firmware:
             firmware = {**self.firmware, 'symbols': [{**s, 'valid': in_ram(s['address'], s['size'], self.settings['ranges'])} for s in self.firmware['symbols']]}
@@ -323,12 +407,20 @@ class Bridge:
             if self.future:
                 raise ValueError('Wait for the current parse to finish.')
             self.firmware, self.path, self.stamp = demo(), None, None
+            self.changed = False
+            self.ignored_active = False
+            self.ignored_stamp = None
             self.slots = ['g_imu.pitch_rad', 'g_imu.roll_rad', 'g_motor.target_rpm', 'g_system.state']
             self.error = ''
             self.persist()
         elif action in ('load', 'reload', 'browse'):
             if self.future:
                 raise ValueError('A firmware file is already loading.')
+            if action == 'reload':
+                if not self.changed and self.path and self.stamp:
+                    self.changed = self._current_change()
+                if self.changed and not data.get('confirmed'):
+                    raise ValueError('Confirm that the current .axf has been flashed before re-parsing.')
             path = self.path if action == 'reload' else data.get('path')
             if action == 'browse':
                 if not self.window:
@@ -340,8 +432,12 @@ class Bridge:
                     return
             if not path or Path(path).suffix.lower() not in ('.axf', '.elf'):
                 raise ValueError('Choose a local .axf or .elf file.')
-            self._start_parse(path)
-            self.error = ''
+            try:
+                self._start_parse(path)
+                self.error = ''
+            except OSError as error:
+                self.error = ('Firmware file is not available yet; wait for the build to finish. '
+                              f'固件暂不可用，已继续监听下次变化。{error}')
         elif action == 'favorite':
             path = data['path']
             favorites = self.saved['favorites']
@@ -403,6 +499,12 @@ class Bridge:
                 raise ValueError('Unknown transport type.')
         elif action == 'transport_disconnect':
             self.manager.disconnect()
+        elif action == 'ignore_change':
+            if not self.changed:
+                raise ValueError('No firmware update to ignore.')
+            self.ignored_active = bool(self.path and self.stamp)
+            self.ignored_stamp = self._file_stamp(self.path) if self.ignored_active else None
+            self.changed = False
         elif action == 'proxy_start':
             config = ProxyConfig.from_dict(data.get('config'))
             self.proxy_config = config

@@ -60,7 +60,7 @@ def make_server(bridge, port=0):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Telemetry Studio')
+    parser = argparse.ArgumentParser(description='Axon')
     parser.add_argument('--browser', action='store_true', help='Open the dashboard in your browser')
     parser.add_argument('--port', type=int, default=0)
     args = parser.parse_args()
@@ -68,7 +68,7 @@ def main():
     server = make_server(bridge, args.port)
     url = f'http://127.0.0.1:{server.server_port}'
     if args.browser:
-        print(f'Telemetry Studio: {url}', flush=True)
+        print(f'Axon: {url}', flush=True)
         webbrowser.open(url)
         try:
             server.serve_forever()
@@ -84,7 +84,7 @@ def main():
             raise SystemExit('Install requirements.txt for desktop mode, or run python main.py --browser.')
         threading.Thread(target=server.serve_forever, daemon=True).start()
         size = bridge.app_state['window_size']
-        bridge.window = webview.create_window('Telemetry Studio', url, width=max(1050, size['width']), height=max(720, size['height']), min_size=(1050, 720))
+        bridge.window = webview.create_window('Axon', url, width=max(1050, size['width']), height=max(720, size['height']), min_size=(1050, 720))
         bridge.window.events.resized += bridge.remember_window_size
         def on_closing():
             if not bridge.prepare_close():
@@ -120,6 +120,6 @@ if __name__ == '__main__':
             except Exception:
                 traceback.print_exc()
                 import ctypes
-                ctypes.windll.user32.MessageBoxW(None, f'启动失败，请查看日志：\n{log_path}', 'Telemetry Studio', 0x10)
+                ctypes.windll.user32.MessageBoxW(None, f'启动失败，请查看日志：\n{log_path}', 'Axon', 0x10)
     else:
         main()

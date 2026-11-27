@@ -7,6 +7,8 @@ import time
 import unittest
 from unittest.mock import patch
 
+import serial
+
 from telemetry.bridge import Bridge
 from telemetry.protocol import ChannelSlot
 from telemetry.storage import Storage
@@ -19,6 +21,7 @@ class FakeSerial:
         self.closed = False
         self.flushes = 0
         self.fail_write = False
+        self.fail_read = False
         self.rx = bytearray()
         self.rx_event = threading.Event()
 
@@ -29,6 +32,8 @@ class FakeSerial:
         return len(payload)
 
     def read(self, size):
+        if self.fail_read:
+            raise serial.SerialException('cable removed')
         if not self.rx:
             self.rx_event.wait(0.05)
             self.rx_event.clear()
@@ -135,6 +140,18 @@ class SerialTransportTests(unittest.TestCase):
             self.assertTrue(fake.closed)
             self.assertIn('device removed', transport.error)
             self.assertIn('Error', transport.get_status())
+
+    def test_read_failure_sets_disconnected_state(self):
+        fake = FakeSerial()
+        with patch('telemetry.transports.serial_transport.serial.Serial', return_value=fake):
+            transport = SerialTransport()
+            self.assertTrue(transport.connect(SerialConfig(port='COM7')))
+            fake.fail_read = True
+            self.assertTrue(wait_for(lambda: not transport.connected))
+            self.assertIn('cable removed', transport.error)
+            self.assertIn('Error', transport.get_status())
+            self.assertTrue(fake.closed)
+            transport.disconnect()
 
     def test_missing_pyserial_keeps_transport_disconnected(self):
         with patch('telemetry.transports.serial_transport.serial', None):
@@ -251,6 +268,18 @@ class BridgeSerialTests(unittest.TestCase):
         finally:
             viewer.close()
 
+    def test_serial_read_failure_is_visible_in_state(self):
+        fake = FakeSerial()
+        with patch('telemetry.transports.serial_transport.serial.Serial', return_value=fake):
+            result = self.bridge.call('transport_connect', {
+                'kind':'serial', 'config':{'port':'COM8', 'baudrate':115200, 'data_bits':8}})
+        self.assertTrue(result['transport']['connected'])
+        fake.fail_read = True
+        self.assertTrue(wait_for(lambda: not self.bridge.manager.transport.connected))
+        state = self.bridge.call('state')
+        self.assertFalse(state['transport']['connected'])
+        self.assertIn('cable removed', state['transport']['error'])
+
     def test_open_failure_is_visible_and_send_is_blocked(self):
         with patch('telemetry.transports.serial_transport.serial.Serial', side_effect=OSError('Access denied')):
             result = self.bridge.call('transport_connect', {'kind':'serial',
@@ -272,7 +301,7 @@ class BridgeSerialTests(unittest.TestCase):
         fake = FakeSerial()
         result = self.connect(fake)
         self.assertTrue(result['transport']['connected'])
-        target = Path(self.temp.name) / 'next.tmws'
+        target = Path(self.temp.name) / 'next.axon'
         result = self.bridge.call('workspace_new', {'path':str(target), 'name':'Next'})
         self.assertNotIn('request_error', result)
         self.assertTrue(fake.closed)

@@ -7,6 +7,7 @@ __pycache__/
 output/
 build/
 dist/
+*.axon
 *.tmws
 app_state.json
 .axf_telemetry/

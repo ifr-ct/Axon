@@ -248,7 +248,7 @@ class BridgeTCPTests(unittest.TestCase):
     def test_workspace_switch_stops_tcp_and_proxy(self):
         result = self.connect(free_port())
         self.assertTrue(result['transport']['connected'])
-        target = Path(self.temp.name) / 'next.tmws'
+        target = Path(self.temp.name) / 'next.axon'
         result = self.bridge.call('workspace_new', {'path':str(target), 'name':'Next'})
         self.assertNotIn('request_error', result)
         self.assertEqual(self.bridge.manager.kind, 'mock')
